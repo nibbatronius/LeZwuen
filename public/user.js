@@ -2,6 +2,14 @@ const avatarImages = Array.from(document.querySelectorAll("[data-avatar-img]"));
 const avatarInput = document.querySelector("[data-avatar-input]");
 const uploadStatus = document.querySelector("[data-upload-status]");
 const defaultAvatar = "avatar-placeholder.svg";
+const apiBaseUrl = window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL ? window.APP_CONFIG.API_BASE_URL : "";
+
+function apiUrl(path) {
+  if (!apiBaseUrl) {
+    return path;
+  }
+  return new URL(path, apiBaseUrl).toString();
+}
 
 function setStatus(message, type) {
   if (!uploadStatus) {
@@ -23,67 +31,30 @@ function updateAvatar(url) {
   });
 }
 
-function readCookie(name) {
-  const cookies = document.cookie ? document.cookie.split("; ") : [];
-  const match = cookies.find((cookie) => cookie.startsWith(`${name}=`));
-  if (!match) {
-    return null;
-  }
-  return decodeURIComponent(match.split("=").slice(1).join("="));
-}
-
-function getStoredUser() {
-  try {
-    return JSON.parse(localStorage.getItem("lezwuenUser"));
-  } catch (error) {
-    return null;
-  }
-}
-
 function setStoredUser(user) {
   if (!user || !user.id) {
     return;
   }
 
   localStorage.setItem("lezwuenUser", JSON.stringify(user));
-  localStorage.setItem("lezwuenUserId", String(user.id));
 }
 
-function getUserId() {
-  const storedUser = getStoredUser();
-  if (storedUser && storedUser.id) {
-    return storedUser.id;
-  }
-
-  const storedId = localStorage.getItem("lezwuenUserId");
-  if (storedId) {
-    const parsedId = Number.parseInt(storedId, 10);
-    if (Number.isInteger(parsedId)) {
-      return parsedId;
-    }
-  }
-
-  const cookieId = readCookie("lezwuenUserId");
-  if (cookieId) {
-    const parsedId = Number.parseInt(cookieId, 10);
-    if (Number.isInteger(parsedId)) {
-      return parsedId;
-    }
-  }
-
-  return null;
+function getAuthToken() {
+  return localStorage.getItem("lezwuenAuthToken");
 }
 
 async function loadProfile() {
-  const userId = getUserId();
+  const token = getAuthToken();
   updateAvatar(defaultAvatar);
 
-  if (!userId) {
+  if (!token) {
     return;
   }
 
   try {
-    const response = await fetch(`/api/users/${userId}`);
+    const response = await fetch(apiUrl("/api/me"), {
+      headers: { Authorization: `Bearer ${token}` }
+    });
     const data = await response.json().catch(() => ({}));
 
     if (response.ok && data.user) {
@@ -98,8 +69,8 @@ async function loadProfile() {
 }
 
 async function uploadAvatar(file) {
-  const userId = getUserId();
-  if (!userId) {
+  const token = getAuthToken();
+  if (!token) {
     setStatus("Please sign in first.", "error");
     return;
   }
@@ -119,10 +90,13 @@ async function uploadAvatar(file) {
   const reader = new FileReader();
   reader.onload = async () => {
     try {
-      const response = await fetch("/api/profile-image", {
+      const response = await fetch(apiUrl("/api/profile-image"), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, imageData: reader.result })
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ imageData: reader.result })
       });
       const data = await response.json().catch(() => ({}));
 

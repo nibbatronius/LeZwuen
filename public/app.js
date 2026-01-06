@@ -1,5 +1,13 @@
 const tabs = document.querySelectorAll(".tab");
 const forms = document.querySelectorAll(".auth-form");
+const apiBaseUrl = window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL ? window.APP_CONFIG.API_BASE_URL : "";
+
+function apiUrl(path) {
+  if (!apiBaseUrl) {
+    return path;
+  }
+  return new URL(path, apiBaseUrl).toString();
+}
 
 function setMode(mode) {
   tabs.forEach((tab) => {
@@ -24,7 +32,7 @@ async function submitAuth(form, endpoint) {
   button.textContent = "Working...";
 
   try {
-    const response = await fetch(endpoint, {
+    const response = await fetch(apiUrl(endpoint), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password })
@@ -40,7 +48,10 @@ async function submitAuth(form, endpoint) {
 
     if (data.user) {
       localStorage.setItem("lezwuenUser", JSON.stringify(data.user));
-      localStorage.setItem("lezwuenUserId", String(data.user.id));
+    }
+
+    if (data.token) {
+      localStorage.setItem("lezwuenAuthToken", data.token);
     }
 
     message.textContent = "Success. Redirecting...";
