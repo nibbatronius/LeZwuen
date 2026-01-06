@@ -60,6 +60,8 @@ app.post("/api/signup", async (req, res) => {
       [email, passwordHash]
     );
 
+    res.cookie("lezwuenUserId", String(result.rows[0].id), { sameSite: "lax" });
+
     return res.status(201).json({
       ok: true,
       user: result.rows[0],
@@ -99,6 +101,8 @@ app.post("/api/login", async (req, res) => {
     if (!match) {
       return res.status(401).json({ error: "Invalid email or password." });
     }
+
+    res.cookie("lezwuenUserId", String(user.id), { sameSite: "lax" });
 
     return res.json({
       ok: true,

@@ -23,6 +23,15 @@ function updateAvatar(url) {
   });
 }
 
+function readCookie(name) {
+  const cookies = document.cookie ? document.cookie.split("; ") : [];
+  const match = cookies.find((cookie) => cookie.startsWith(`${name}=`));
+  if (!match) {
+    return null;
+  }
+  return decodeURIComponent(match.split("=").slice(1).join("="));
+}
+
 function getStoredUser() {
   try {
     return JSON.parse(localStorage.getItem("lezwuenUser"));
@@ -31,20 +40,57 @@ function getStoredUser() {
   }
 }
 
-async function loadProfile() {
-  const user = getStoredUser();
-  updateAvatar(defaultAvatar);
-
+function setStoredUser(user) {
   if (!user || !user.id) {
     return;
   }
 
+  localStorage.setItem("lezwuenUser", JSON.stringify(user));
+  localStorage.setItem("lezwuenUserId", String(user.id));
+}
+
+function getUserId() {
+  const storedUser = getStoredUser();
+  if (storedUser && storedUser.id) {
+    return storedUser.id;
+  }
+
+  const storedId = localStorage.getItem("lezwuenUserId");
+  if (storedId) {
+    const parsedId = Number.parseInt(storedId, 10);
+    if (Number.isInteger(parsedId)) {
+      return parsedId;
+    }
+  }
+
+  const cookieId = readCookie("lezwuenUserId");
+  if (cookieId) {
+    const parsedId = Number.parseInt(cookieId, 10);
+    if (Number.isInteger(parsedId)) {
+      return parsedId;
+    }
+  }
+
+  return null;
+}
+
+async function loadProfile() {
+  const userId = getUserId();
+  updateAvatar(defaultAvatar);
+
+  if (!userId) {
+    return;
+  }
+
   try {
-    const response = await fetch(`/api/users/${user.id}`);
+    const response = await fetch(`/api/users/${userId}`);
     const data = await response.json().catch(() => ({}));
 
-    if (response.ok && data.user && data.user.profile_image_url) {
-      updateAvatar(data.user.profile_image_url);
+    if (response.ok && data.user) {
+      if (data.user.profile_image_url) {
+        updateAvatar(data.user.profile_image_url);
+      }
+      setStoredUser(data.user);
     }
   } catch (error) {
     setStatus("Unable to load profile.", "error");
@@ -52,8 +98,8 @@ async function loadProfile() {
 }
 
 async function uploadAvatar(file) {
-  const user = getStoredUser();
-  if (!user || !user.id) {
+  const userId = getUserId();
+  if (!userId) {
     setStatus("Please sign in first.", "error");
     return;
   }
@@ -76,7 +122,7 @@ async function uploadAvatar(file) {
       const response = await fetch("/api/profile-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: user.id, imageData: reader.result })
+        body: JSON.stringify({ userId, imageData: reader.result })
       });
       const data = await response.json().catch(() => ({}));
 

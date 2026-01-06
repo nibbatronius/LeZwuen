@@ -40,6 +40,7 @@ async function submitAuth(form, endpoint) {
 
     if (data.user) {
       localStorage.setItem("lezwuenUser", JSON.stringify(data.user));
+      localStorage.setItem("lezwuenUserId", String(data.user.id));
     }
 
     message.textContent = "Success. Redirecting...";
