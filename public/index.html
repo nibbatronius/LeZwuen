@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LeZwuen | Precision Crafted Experiences</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <section class="hero">
+        <p class="eyebrow">LeZwuen Studio</p>
+        <h1>Minimal surfaces. Maximum signal.</h1>
+        <p class="subhead">
+          A focused workspace for teams who value clarity, rhythm, and premium feel.
+          Keep the product clean. Keep the experience unforgettable.
+        </p>
+        <div class="highlights">
+          <div>
+            <p class="highlight-title">Launch-ready</p>
+            <p class="highlight-body">Build and ship faster with modular flows.</p>
+          </div>
+          <div>
+            <p class="highlight-title">Trusted security</p>
+            <p class="highlight-body">Neon-backed data with modern guardrails.</p>
+          </div>
+          <div>
+            <p class="highlight-title">Quiet luxury</p>
+            <p class="highlight-body">Design that whispers confidence.</p>
+          </div>
+        </div>
+        <div class="cta-row">
+          <button class="ghost" type="button">View the craft</button>
+          <span class="cta-note">No credit card. Cancel anytime.</span>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <p class="eyebrow">Member Access</p>
+          <h2>Enter the atelier</h2>
+          <p class="card-subhead">Your private access begins here.</p>
+        </div>
+
+        <div class="auth-tabs">
+          <button type="button" class="tab active" data-tab="login">Log in</button>
+          <button type="button" class="tab" data-tab="signup">Sign up</button>
+        </div>
+
+        <form id="login-form" class="auth-form active" data-form="login" autocomplete="on">
+          <label>
+            Email address
+            <input type="email" name="email" placeholder="you@studio.com" autocomplete="email" required />
+          </label>
+          <label>
+            Password
+            <input type="password" name="password" placeholder="????????" autocomplete="current-password" required />
+          </label>
+          <div class="form-message" role="status" aria-live="polite"></div>
+          <button class="primary" type="submit">Log in</button>
+          <p class="form-footnote">Need an invite? We are accepting 100 founders this month.</p>
+        </form>
+
+        <form id="signup-form" class="auth-form" data-form="signup" autocomplete="on">
+          <label>
+            Email address
+            <input type="email" name="email" placeholder="you@studio.com" autocomplete="email" required />
+          </label>
+          <label>
+            Password
+            <input type="password" name="password" placeholder="Minimum 8 characters" autocomplete="new-password" required />
+          </label>
+          <div class="form-message" role="status" aria-live="polite"></div>
+          <button class="primary" type="submit">Create account</button>
+          <p class="form-footnote">By joining, you agree to our product pledge.</p>
+        </form>
+      </section>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>
