@@ -38,6 +38,10 @@ async function submitAuth(form, endpoint) {
       return;
     }
 
+    if (data.user) {
+      localStorage.setItem("lezwuenUser", JSON.stringify(data.user));
+    }
+
     message.textContent = "Success. Redirecting...";
     message.setAttribute("data-type", "success");
     window.location.href = data.redirect || "/skeleton.html";

@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="Profile">
+  <defs>
+    <linearGradient id="cap" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8cf7c4" />
+      <stop offset="1" stop-color="#e1b46a" />
+    </linearGradient>
+    <linearGradient id="stem" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1a2b1f" />
+      <stop offset="1" stop-color="#2c3e2f" />
+    </linearGradient>
+  </defs>
+  <rect width="200" height="200" rx="100" fill="#0a100d" />
+  <circle cx="64" cy="76" r="18" fill="rgba(255,255,255,0.08)" />
+  <circle cx="136" cy="70" r="12" fill="rgba(255,255,255,0.1)" />
+  <path
+    d="M30 100c0-38 35-58 70-58s70 20 70 58c0 10-2 18-5 24H35c-3-6-5-14-5-24z"
+    fill="url(#cap)"
+  />
+  <path
+    d="M85 122h30c6 0 10 5 10 11v28c0 10-7 19-20 19s-20-9-20-19v-28c0-6 4-11 10-11z"
+    fill="url(#stem)"
+  />
+  <circle cx="76" cy="98" r="8" fill="rgba(6,8,6,0.3)" />
+  <circle cx="120" cy="96" r="6" fill="rgba(6,8,6,0.3)" />
+</svg>
