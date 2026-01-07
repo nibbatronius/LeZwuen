@@ -1,6 +1,5 @@
 const shareButton = document.querySelector("[data-share-location]");
 const locationStatus = document.querySelector("[data-location-status]");
-const roomList = document.querySelector("[data-room-list]");
 const roomTitle = document.querySelector("[data-room-title]");
 const roomSubtitle = document.querySelector("[data-room-subtitle]");
 const roomPresence = document.querySelector("[data-room-presence]");
@@ -17,6 +16,7 @@ let currentRoom = null;
 let roomsCache = [];
 let presenceTimer = null;
 let pendingLocation = null;
+const blockedIds = new Set();
 
 function apiUrl(path) {
   if (!apiBaseUrl) {
@@ -27,6 +27,18 @@ function apiUrl(path) {
 
 function getAuthToken() {
   return localStorage.getItem("lezwuenAuthToken");
+}
+
+function getStoredUser() {
+  const raw = localStorage.getItem("lezwuenUser");
+  if (!raw) {
+    return null;
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    return null;
+  }
 }
 
 function setStatus(message, type) {
@@ -55,7 +67,7 @@ function hideAgeGate() {
 
 function setRoomHeader(room) {
   if (roomTitle) {
-    roomTitle.textContent = room ? room.label : "Select a room";
+    roomTitle.textContent = room ? room.label : "Nearby chat";
   }
   if (roomSubtitle) {
     roomSubtitle.textContent = room
@@ -89,6 +101,79 @@ async function apiRequest(path, options = {}) {
   return { response, data };
 }
 
+async function loadBlocklist() {
+  const token = getAuthToken();
+  if (!token) {
+    return;
+  }
+
+  try {
+    const { response, data } = await apiRequest("/api/blocklist");
+    if (!response.ok) {
+      return;
+    }
+
+    blockedIds.clear();
+    if (Array.isArray(data.blockedIds)) {
+      data.blockedIds.forEach((id) => {
+        const numericId = Number(id);
+        if (Number.isFinite(numericId)) {
+          blockedIds.add(numericId);
+        }
+      });
+    }
+  } catch (error) {
+    // Blocklist is optional for rendering.
+  }
+}
+
+function getCurrentUserId() {
+  const user = getStoredUser();
+  if (!user) {
+    return null;
+  }
+
+  const id = Number(user.id);
+  if (!Number.isFinite(id)) {
+    return null;
+  }
+
+  return id;
+}
+
+async function blockUser(blockedUserId, displayName) {
+  const numericId = Number(blockedUserId);
+  if (!Number.isFinite(numericId)) {
+    return;
+  }
+
+  const label = displayName || "this user";
+  if (!window.confirm(`Ignore all messages from ${label}?`)) {
+    return;
+  }
+
+  try {
+    const { response, data } = await apiRequest("/api/block", {
+      method: "POST",
+      body: JSON.stringify({ blockedUserId: numericId })
+    });
+
+    if (!response.ok) {
+      setStatus(data.error || "Unable to ignore this user.", "error");
+      return;
+    }
+
+    blockedIds.add(numericId);
+    setStatus("User ignored. Their messages are now hidden.", "success");
+
+    if (currentRoom) {
+      await loadMessages(currentRoom.roomKey);
+    }
+  } catch (error) {
+    setStatus("Unable to ignore this user.", "error");
+  }
+}
+
 async function saveLocation(coords) {
   const token = getAuthToken();
   if (!token) {
@@ -107,7 +192,7 @@ async function saveLocation(coords) {
     if (response.status === 403) {
       pendingLocation = coords;
       showAgeGate();
-      setStatus("Confirm your age to unlock nearby rooms.", "error");
+      setStatus("Confirm your age to unlock nearby chat.", "error");
       return;
     }
 
@@ -122,7 +207,7 @@ async function saveLocation(coords) {
     }
 
     pendingLocation = null;
-    setStatus("Location shared. Nearby rooms are now available.", "success");
+    setStatus("Location shared. Nearby chat is now available.", "success");
     await loadRooms();
   } catch (error) {
     setStatus("Unable to save location.", "error");
@@ -136,7 +221,7 @@ function handleGeolocationError(error) {
   }
 
   if (error.code === error.PERMISSION_DENIED) {
-    setStatus("Location access was denied. Enable it to see nearby rooms.", "error");
+    setStatus("Location access was denied. Enable it to see nearby chat.", "error");
     return;
   }
 
@@ -193,13 +278,9 @@ function shareLocation() {
 }
 
 async function loadRooms() {
-  if (!roomList) {
-    return;
-  }
-
   const token = getAuthToken();
   if (!token) {
-    setStatus("Please sign in to view nearby rooms.", "error");
+    setStatus("Please sign in to view nearby chat.", "error");
     return;
   }
 
@@ -208,67 +289,36 @@ async function loadRooms() {
 
     if (response.status === 403) {
       showAgeGate();
-      setStatus("Confirm your age to access nearby rooms.", "error");
+      setStatus("Confirm your age to access nearby chat.", "error");
       return;
     }
 
     if (response.status === 400) {
-      setStatus(data.error || "Share your location to unlock nearby rooms.", "info");
+      setStatus(data.error || "Share your location to unlock nearby chat.", "info");
       return;
     }
 
     if (!response.ok) {
-      setStatus(data.error || "Unable to load rooms.", "error");
+      setStatus(data.error || "Unable to load nearby chat.", "error");
       return;
     }
 
     roomsCache = Array.isArray(data.rooms) ? data.rooms : [];
-    renderRooms(roomsCache);
-  } catch (error) {
-    setStatus("Unable to load rooms.", "error");
-  }
-}
 
-function renderRooms(rooms) {
-  if (!roomList) {
-    return;
-  }
-
-  roomList.textContent = "";
-
-  if (!rooms.length) {
-    const empty = document.createElement("div");
-    empty.className = "room-empty";
-    empty.textContent = "No nearby rooms yet. Share your location to refresh.";
-    roomList.append(empty);
-    return;
-  }
-
-  rooms.forEach((room) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "room-item";
-    button.setAttribute("data-room-key", room.roomKey);
-
-    if (currentRoom && currentRoom.roomKey === room.roomKey) {
-      button.classList.add("active");
+    if (!roomsCache.length) {
+      setStatus("No nearby chat available yet.", "info");
+      setRoomHeader(null);
+      currentRoom = null;
+      if (chatLog) {
+        chatLog.textContent = "Share your location to connect with nearby members.";
+      }
+      return;
     }
 
-    const label = document.createElement("span");
-    label.className = "room-label";
-    label.textContent = room.label;
-
-    const count = document.createElement("span");
-    count.className = "room-count";
-    count.textContent = formatActiveCount(room.activeCount);
-
-    button.append(label, count);
-    button.addEventListener("click", () => selectRoom(room));
-    roomList.append(button);
-  });
-
-  if (!currentRoom) {
-    selectRoom(rooms[0]);
+    const closestRoom = roomsCache[0];
+    await selectRoom(closestRoom);
+  } catch (error) {
+    setStatus("Unable to load nearby chat.", "error");
   }
 }
 
@@ -290,7 +340,6 @@ async function selectRoom(room) {
   }
 
   currentRoom = room;
-  renderRooms(roomsCache);
   setRoomHeader(room);
   await joinRoom(room.roomKey);
   await loadMessages(room.roomKey);
@@ -336,8 +385,14 @@ function renderMessages(messages) {
   }
 
   chatLog.textContent = "";
+  const currentUserId = getCurrentUserId();
 
-  if (!messages.length) {
+  const visibleMessages = messages.filter((message) => {
+    const id = Number(message.user_id);
+    return !Number.isFinite(id) || !blockedIds.has(id);
+  });
+
+  if (!visibleMessages.length) {
     const empty = document.createElement("div");
     empty.className = "chat-empty";
     empty.textContent = "No messages yet. Start the conversation.";
@@ -345,16 +400,18 @@ function renderMessages(messages) {
     return;
   }
 
-  messages.forEach((message) => {
+  visibleMessages.forEach((message) => {
     const wrapper = document.createElement("div");
     wrapper.className = "chat-message";
+    const messageUserId = Number(message.user_id);
+    const isCurrentUser = currentUserId && messageUserId === currentUserId;
 
     const meta = document.createElement("div");
     meta.className = "chat-message-meta";
 
     const name = document.createElement("span");
     name.className = "chat-message-name";
-    name.textContent = message.display_name || "Member";
+    name.textContent = isCurrentUser ? "You" : message.display_name || "Member";
 
     const time = document.createElement("span");
     time.className = "chat-message-time";
@@ -366,7 +423,23 @@ function renderMessages(messages) {
     body.className = "chat-message-body";
     body.textContent = message.body;
 
-    wrapper.append(meta, body);
+    if (currentUserId && !isCurrentUser) {
+      const actions = document.createElement("div");
+      actions.className = "chat-message-actions";
+
+      const ignoreButton = document.createElement("button");
+      ignoreButton.type = "button";
+      ignoreButton.className = "ghost chat-ignore";
+      ignoreButton.textContent = "Ignore";
+      ignoreButton.addEventListener("click", () => {
+        blockUser(messageUserId, message.display_name);
+      });
+
+      actions.append(ignoreButton);
+      wrapper.append(meta, body, actions);
+    } else {
+      wrapper.append(meta, body);
+    }
     chatLog.append(wrapper);
   });
 
@@ -375,7 +448,7 @@ function renderMessages(messages) {
 
 async function sendMessage(body) {
   if (!currentRoom) {
-    setStatus("Select a room before sending a message.", "error");
+    setStatus("Share your location to connect before sending a message.", "error");
     return;
   }
 
@@ -484,5 +557,5 @@ if (ageConfirm) {
 
 setRoomHeader(null);
 if (getAuthToken()) {
-  loadRooms();
+  loadBlocklist().then(loadRooms);
 }

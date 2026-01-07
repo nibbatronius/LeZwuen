@@ -58,6 +58,8 @@ function setMode(mode) {
 async function submitAuth(form, endpoint) {
   const email = form.querySelector("input[name='email']").value.trim();
   const password = form.querySelector("input[name='password']").value;
+  const displayNameInput = form.querySelector("input[name='displayName']");
+  const displayName = displayNameInput ? displayNameInput.value.trim() : "";
   const message = form.querySelector(".form-message");
   const button = form.querySelector("button[type='submit']");
   const originalLabel = button.textContent;
@@ -68,10 +70,20 @@ async function submitAuth(form, endpoint) {
   button.textContent = "Working...";
 
   try {
+    if (endpoint === "/api/signup") {
+      if (displayName.length < 2 || displayName.length > 32) {
+        message.textContent = "Display name must be 2-32 characters.";
+        message.setAttribute("data-type", "error");
+        return;
+      }
+    }
+
     const response = await fetch(apiUrl(endpoint), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password })
+      body: JSON.stringify(
+        endpoint === "/api/signup" ? { email, password, displayName } : { email, password }
+      )
     });
 
     const data = await response.json().catch(() => ({}));

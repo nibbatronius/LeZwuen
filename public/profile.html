@@ -43,6 +43,56 @@
           alt="Profile avatar"
           data-avatar-img
         />
+        <div class="profile-details">
+          <div class="profile-field">
+            <div class="profile-field-label">Display name</div>
+            <div class="profile-field-row">
+              <span class="profile-field-value" data-profile-value="display_name">Loading...</span>
+              <button
+                class="icon-button"
+                type="button"
+                data-profile-edit="display_name"
+                aria-label="Edit display name"
+              >
+                Edit
+              </button>
+            </div>
+            <div class="profile-field-editor" data-profile-editor="display_name" hidden>
+              <input
+                type="text"
+                maxlength="32"
+                autocomplete="nickname"
+                data-profile-input="display_name"
+              />
+              <div class="profile-field-actions">
+                <button class="ghost" type="button" data-profile-save="display_name">Save</button>
+                <button class="ghost" type="button" data-profile-cancel="display_name">Cancel</button>
+              </div>
+            </div>
+          </div>
+          <div class="profile-field">
+            <div class="profile-field-label">Email</div>
+            <div class="profile-field-row">
+              <span class="profile-field-value" data-profile-value="email">Loading...</span>
+              <button
+                class="icon-button"
+                type="button"
+                data-profile-edit="email"
+                aria-label="Edit email"
+              >
+                Edit
+              </button>
+            </div>
+            <div class="profile-field-editor" data-profile-editor="email" hidden>
+              <input type="email" autocomplete="email" data-profile-input="email" />
+              <div class="profile-field-actions">
+                <button class="ghost" type="button" data-profile-save="email">Save</button>
+                <button class="ghost" type="button" data-profile-cancel="email">Cancel</button>
+              </div>
+            </div>
+          </div>
+          <div class="profile-status" data-profile-status aria-live="polite"></div>
+        </div>
       </section>
     </main>
     <script src="config.js"></script>

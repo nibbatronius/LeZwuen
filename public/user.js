@@ -1,8 +1,22 @@
 const avatarImages = Array.from(document.querySelectorAll("[data-avatar-img]"));
 const avatarInput = document.querySelector("[data-avatar-input]");
 const uploadStatus = document.querySelector("[data-upload-status]");
+const profileStatus = document.querySelector("[data-profile-status]");
 const defaultAvatar = "avatar-placeholder.svg";
 const apiBaseUrl = window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL ? window.APP_CONFIG.API_BASE_URL : "";
+const profileFields = ["display_name", "email"];
+
+const profileElements = profileFields.reduce((acc, field) => {
+  acc[field] = {
+    value: document.querySelector(`[data-profile-value='${field}']`),
+    input: document.querySelector(`[data-profile-input='${field}']`),
+    edit: document.querySelector(`[data-profile-edit='${field}']`),
+    save: document.querySelector(`[data-profile-save='${field}']`),
+    cancel: document.querySelector(`[data-profile-cancel='${field}']`),
+    editor: document.querySelector(`[data-profile-editor='${field}']`)
+  };
+  return acc;
+}, {});
 
 function apiUrl(path) {
   if (!apiBaseUrl) {
@@ -44,11 +58,48 @@ function setStatus(message, type) {
   }
 }
 
+function setProfileStatus(message, type) {
+  if (!profileStatus) {
+    return;
+  }
+
+  profileStatus.textContent = message;
+  if (type) {
+    profileStatus.setAttribute("data-type", type);
+  } else {
+    profileStatus.removeAttribute("data-type");
+  }
+}
+
 function updateAvatar(url) {
   const nextUrl = normalizeAvatarUrl(url);
   avatarImages.forEach((img) => {
     img.src = nextUrl;
   });
+}
+
+function updateProfileFields(user) {
+  if (!user) {
+    return;
+  }
+
+  const displayNameValue = profileElements.display_name.value;
+  const displayNameInput = profileElements.display_name.input;
+  if (displayNameValue) {
+    displayNameValue.textContent = user.display_name || "Not set";
+  }
+  if (displayNameInput) {
+    displayNameInput.value = user.display_name || "";
+  }
+
+  const emailValue = profileElements.email.value;
+  const emailInput = profileElements.email.input;
+  if (emailValue) {
+    emailValue.textContent = user.email || "Not set";
+  }
+  if (emailInput) {
+    emailInput.value = user.email || "";
+  }
 }
 
 function setStoredUser(user) {
@@ -57,15 +108,33 @@ function setStoredUser(user) {
   }
 
   localStorage.setItem("lezwuenUser", JSON.stringify(user));
+  updateProfileFields(user);
 }
 
 function getAuthToken() {
   return localStorage.getItem("lezwuenAuthToken");
 }
 
+function getStoredUser() {
+  const raw = localStorage.getItem("lezwuenUser");
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    return null;
+  }
+}
+
 async function loadProfile() {
   const token = getAuthToken();
   updateAvatar(defaultAvatar);
+  const storedUser = getStoredUser();
+  if (storedUser) {
+    updateProfileFields(storedUser);
+  }
 
   if (!token) {
     return;
@@ -82,6 +151,7 @@ async function loadProfile() {
         updateAvatar(data.user.profile_image_url);
       }
       setStoredUser(data.user);
+      updateProfileFields(data.user);
     }
   } catch (error) {
     setStatus("Unable to load profile.", "error");
@@ -139,6 +209,84 @@ async function uploadAvatar(file) {
   reader.readAsDataURL(file);
 }
 
+function toggleProfileEditor(field, show) {
+  const elements = profileElements[field];
+  if (!elements) {
+    return;
+  }
+
+  if (elements.editor) {
+    elements.editor.hidden = !show;
+  }
+  if (elements.edit) {
+    elements.edit.hidden = show;
+  }
+  if (show && elements.input) {
+    elements.input.focus();
+  }
+}
+
+function validateProfileField(field, value) {
+  if (field === "display_name") {
+    if (value.length < 2 || value.length > 32) {
+      return "Display name must be 2-32 characters.";
+    }
+  }
+
+  if (field === "email") {
+    if (!value || !value.includes("@")) {
+      return "Please enter a valid email.";
+    }
+  }
+
+  return "";
+}
+
+async function saveProfileField(field) {
+  const token = getAuthToken();
+  const elements = profileElements[field];
+  if (!elements || !elements.input) {
+    return;
+  }
+
+  if (!token) {
+    setProfileStatus("Please sign in to update your profile.", "error");
+    return;
+  }
+
+  const value = elements.input.value.trim();
+  const errorMessage = validateProfileField(field, value);
+  if (errorMessage) {
+    setProfileStatus(errorMessage, "error");
+    return;
+  }
+
+  const payload = field === "display_name" ? { displayName: value } : { email: value };
+
+  try {
+    const response = await fetch(apiUrl("/api/profile"), {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify(payload)
+    });
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      setProfileStatus(data.error || "Unable to update profile.", "error");
+      return;
+    }
+
+    setProfileStatus("Updated.", "success");
+    setStoredUser(data.user);
+    toggleProfileEditor(field, false);
+  } catch (error) {
+    setProfileStatus("Unable to update profile.", "error");
+  }
+}
+
 if (avatarInput) {
   avatarInput.addEventListener("change", (event) => {
     const file = event.target.files && event.target.files[0];
@@ -150,6 +298,48 @@ if (avatarInput) {
     event.target.value = "";
   });
 }
+
+profileFields.forEach((field) => {
+  const elements = profileElements[field];
+  if (!elements) {
+    return;
+  }
+
+  if (elements.edit) {
+    elements.edit.addEventListener("click", () => {
+      if (elements.value && elements.input) {
+        const currentValue = elements.value.textContent;
+        elements.input.value = currentValue === "Not set" ? "" : currentValue;
+      }
+      setProfileStatus("", null);
+      toggleProfileEditor(field, true);
+    });
+  }
+
+  if (elements.save) {
+    elements.save.addEventListener("click", () => saveProfileField(field));
+  }
+
+  if (elements.cancel) {
+    elements.cancel.addEventListener("click", () => {
+      const storedUser = getStoredUser();
+      if (storedUser) {
+        updateProfileFields(storedUser);
+      }
+      setProfileStatus("", null);
+      toggleProfileEditor(field, false);
+    });
+  }
+
+  if (elements.input) {
+    elements.input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        saveProfileField(field);
+      }
+    });
+  }
+});
 
 avatarImages.forEach((img) => {
   img.addEventListener("error", () => {

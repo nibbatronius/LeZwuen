@@ -31,11 +31,17 @@ async function initDb() {
     );
   `);
 
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_image_url TEXT;`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS location_bucket TEXT;`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS location_bucket_1k TEXT;`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS location_bucket_5k TEXT;`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_adult BOOLEAN DEFAULT FALSE;`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_image_url TEXT;`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name TEXT;`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS location_bucket TEXT;`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS location_bucket_1k TEXT;`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS location_bucket_5k TEXT;`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_adult BOOLEAN DEFAULT FALSE;`);
+    await pool.query(`
+      UPDATE users
+      SET display_name = split_part(email, '@', 1)
+      WHERE display_name IS NULL
+    `);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS sessions (
@@ -252,6 +258,7 @@ async function getUserFromToken(token) {
     `
       SELECT users.id,
              users.email,
+             users.display_name,
              users.profile_image_url,
              users.location_bucket,
              users.location_bucket_1k,
@@ -281,9 +288,14 @@ app.get("/code-of-conduct", (req, res) => {
 app.post("/api/signup", async (req, res) => {
   const email = (req.body.email || "").trim().toLowerCase();
   const password = req.body.password || "";
+  const displayName = (req.body.displayName || "").trim();
 
   if (!email || !email.includes("@")) {
     return res.status(400).json({ error: "Please enter a valid email." });
+  }
+
+  if (displayName.length < 2 || displayName.length > 32) {
+    return res.status(400).json({ error: "Display name must be 2-32 characters." });
   }
 
   if (password.length < 8) {
@@ -293,8 +305,12 @@ app.post("/api/signup", async (req, res) => {
   try {
     const passwordHash = await bcrypt.hash(password, 10);
     const result = await pool.query(
-      "INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email",
-      [email, passwordHash]
+      `
+        INSERT INTO users (email, password_hash, display_name)
+        VALUES ($1, $2, $3)
+        RETURNING id, email, display_name
+      `,
+      [email, passwordHash, displayName]
     );
 
     const token = await createSession(result.rows[0].id);
@@ -325,7 +341,7 @@ app.post("/api/login", async (req, res) => {
 
   try {
     const result = await pool.query(
-      "SELECT id, email, password_hash FROM users WHERE email = $1",
+      "SELECT id, email, display_name, password_hash FROM users WHERE email = $1",
       [email]
     );
 
@@ -344,7 +360,7 @@ app.post("/api/login", async (req, res) => {
 
     return res.json({
       ok: true,
-      user: { id: user.id, email: user.email },
+      user: { id: user.id, email: user.email, display_name: user.display_name },
       token,
       redirect: "/skeleton.html"
     });
@@ -363,7 +379,7 @@ app.get("/api/users/:id", async (req, res) => {
 
   try {
     const result = await pool.query(
-      "SELECT id, email, profile_image_url FROM users WHERE id = $1",
+      "SELECT id, email, display_name, profile_image_url FROM users WHERE id = $1",
       [userId]
     );
 
@@ -396,6 +412,75 @@ app.get("/api/me", async (req, res) => {
   } catch (error) {
     console.error("Profile lookup failed:", error);
     return res.status(500).json({ error: "Unable to load profile." });
+  }
+});
+
+app.patch("/api/profile", async (req, res) => {
+  const token = getTokenFromRequest(req);
+  const displayNameInput = req.body.displayName;
+  const emailInput = req.body.email;
+
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+
+  if (displayNameInput === undefined && emailInput === undefined) {
+    return res.status(400).json({ error: "No profile updates provided." });
+  }
+
+  try {
+    const user = await getUserFromToken(token);
+
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized." });
+    }
+
+    const updates = [];
+    const values = [];
+    let index = 1;
+
+    if (displayNameInput !== undefined) {
+      const displayName = String(displayNameInput).trim();
+      if (displayName.length < 2 || displayName.length > 32) {
+        return res.status(400).json({ error: "Display name must be 2-32 characters." });
+      }
+      updates.push(`display_name = $${index}`);
+      values.push(displayName);
+      index += 1;
+    }
+
+    if (emailInput !== undefined) {
+      const email = String(emailInput).trim().toLowerCase();
+      if (!email || !email.includes("@")) {
+        return res.status(400).json({ error: "Please enter a valid email." });
+      }
+      updates.push(`email = $${index}`);
+      values.push(email);
+      index += 1;
+    }
+
+    if (!updates.length) {
+      return res.status(400).json({ error: "No profile updates provided." });
+    }
+
+    values.push(user.id);
+    const result = await pool.query(
+      `
+        UPDATE users
+        SET ${updates.join(", ")}
+        WHERE id = $${index}
+        RETURNING id, email, display_name, profile_image_url
+      `,
+      values
+    );
+
+    return res.json({ ok: true, user: result.rows[0] });
+  } catch (error) {
+    if (error.code === "23505") {
+      return res.status(409).json({ error: "Email is already registered." });
+    }
+    console.error("Profile update failed:", error);
+    return res.status(500).json({ error: "Unable to update profile." });
   }
 });
 
@@ -619,7 +704,8 @@ app.get("/api/nearby/rooms/:roomKey/messages", async (req, res) => {
                m.user_id,
                m.body,
                m.created_at,
-               u.email
+               u.email,
+               u.display_name
         FROM nearby_messages m
         JOIN users u ON u.id = m.user_id
         WHERE m.room_key = $1
@@ -635,7 +721,7 @@ app.get("/api/nearby/rooms/:roomKey/messages", async (req, res) => {
       user_id: row.user_id,
       body: row.body,
       created_at: row.created_at,
-      display_name: row.email.split("@")[0]
+      display_name: row.display_name || row.email.split("@")[0]
     }));
 
     return res.json({ ok: true, messages: messages.reverse() });
@@ -698,7 +784,7 @@ app.post("/api/nearby/rooms/:roomKey/messages", async (req, res) => {
       user_id: user.id,
       body,
       created_at: result.rows[0].created_at,
-      display_name: user.email.split("@")[0]
+      display_name: user.display_name || user.email.split("@")[0]
     };
 
     broadcastToRoom(roomKey, payload);
