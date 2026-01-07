@@ -2,6 +2,7 @@ const avatarImages = Array.from(document.querySelectorAll("[data-avatar-img]"));
 const avatarInput = document.querySelector("[data-avatar-input]");
 const uploadStatus = document.querySelector("[data-upload-status]");
 const profileStatus = document.querySelector("[data-profile-status]");
+const logoutButton = document.querySelector("[data-logout]");
 const defaultAvatar = "avatar-placeholder.svg";
 const apiBaseUrl = window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL ? window.APP_CONFIG.API_BASE_URL : "";
 const profileFields = ["display_name", "email"];
@@ -391,3 +392,11 @@ window.addEventListener("pageshow", () => {
 });
 
 loadProfile();
+
+if (logoutButton) {
+  logoutButton.addEventListener("click", () => {
+    localStorage.removeItem("lezwuenAuthToken");
+    localStorage.removeItem("lezwuenUser");
+    window.location.href = "/index.html";
+  });
+}

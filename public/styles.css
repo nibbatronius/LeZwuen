@@ -504,6 +504,11 @@ body::after {
   color: var(--muted);
 }
 
+.profile-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .profile-status[data-type="error"] {
   color: #ff9a9a;
 }
