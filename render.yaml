@@ -20,5 +20,7 @@ services:
         sync: false
       - key: DATABASE_URL
         sync: false
+      - key: OWNER_DISPLAY_NAME
+        sync: false
       - key: API_BASE_URL
         sync: false

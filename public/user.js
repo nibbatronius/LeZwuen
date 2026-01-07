@@ -5,6 +5,7 @@ const profileStatus = document.querySelector("[data-profile-status]");
 const defaultAvatar = "avatar-placeholder.svg";
 const apiBaseUrl = window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL ? window.APP_CONFIG.API_BASE_URL : "";
 const profileFields = ["display_name", "email"];
+const accountTypeValue = document.querySelector("[data-profile-value='account_type']");
 
 const profileElements = profileFields.reduce((acc, field) => {
   acc[field] = {
@@ -113,6 +114,12 @@ function updateProfileFields(user) {
   }
   if (emailInput) {
     emailInput.value = user.email || "";
+  }
+
+  if (accountTypeValue) {
+    const accountType = String(user.account_type || "guest").toLowerCase();
+    accountTypeValue.textContent = accountType === "owner" ? "Owner" : "Guest";
+    accountTypeValue.setAttribute("data-type", accountType);
   }
 }
 

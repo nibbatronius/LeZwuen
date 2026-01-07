@@ -19,6 +19,7 @@ const pool = new Pool({
   connectionString: databaseUrl,
   ssl: useSsl ? { rejectUnauthorized: false } : undefined
 });
+const DEFAULT_OWNER_DISPLAY_NAME = "NibbaTronius";
 
 async function initDb() {
   await pool.query(`
@@ -33,6 +34,8 @@ async function initDb() {
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_image_url TEXT;`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name TEXT;`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_adult BOOLEAN DEFAULT FALSE;`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS account_type TEXT DEFAULT 'guest';`);
+    await pool.query(`UPDATE users SET account_type = 'guest' WHERE account_type IS NULL;`);
     await pool.query(`
       UPDATE users
       SET display_name = split_part(email, '@', 1)
@@ -48,6 +51,7 @@ async function initDb() {
     );
   `);
 
+  await syncOwnerAccount();
   }
 
 const uploadDir = process.env.UPLOAD_DIR || path.join(__dirname, "public", "uploads");
@@ -142,7 +146,8 @@ async function getUserFromToken(token) {
              users.email,
              users.display_name,
              users.profile_image_url,
-             users.is_adult
+             users.is_adult,
+             users.account_type
       FROM sessions
       JOIN users ON users.id = sessions.user_id
       WHERE sessions.token = $1
@@ -150,6 +155,33 @@ async function getUserFromToken(token) {
     [token]
   );
   return result.rows[0];
+}
+
+function getOwnerDisplayName() {
+  return (process.env.OWNER_DISPLAY_NAME || DEFAULT_OWNER_DISPLAY_NAME || "").trim();
+}
+
+async function syncOwnerAccount() {
+  const ownerDisplayName = getOwnerDisplayName();
+  if (!ownerDisplayName) {
+    return;
+  }
+
+  const result = await pool.query(
+    "SELECT id FROM users WHERE LOWER(display_name) = LOWER($1) ORDER BY id ASC LIMIT 1",
+    [ownerDisplayName]
+  );
+
+  if (!result.rows.length) {
+    console.warn(`Owner display name not found: ${ownerDisplayName}`);
+    return;
+  }
+
+  const ownerId = result.rows[0].id;
+  await pool.query("UPDATE users SET account_type = 'guest' WHERE account_type = 'owner' AND id <> $1", [
+    ownerId
+  ]);
+  await pool.query("UPDATE users SET account_type = 'owner' WHERE id = $1", [ownerId]);
 }
 
 app.get("/healthz", (req, res) => {
@@ -179,7 +211,7 @@ app.post("/api/signup", async (req, res) => {
       `
         INSERT INTO users (email, password_hash, display_name)
         VALUES ($1, $2, $3)
-        RETURNING id, email, display_name
+        RETURNING id, email, display_name, account_type
       `,
       [email, passwordHash, displayName]
     );
@@ -190,7 +222,7 @@ app.post("/api/signup", async (req, res) => {
       ok: true,
       user: result.rows[0],
       token,
-      redirect: "/skeleton.html"
+      redirect: "/home.html"
     });
   } catch (error) {
     if (error.code === "23505") {
@@ -212,7 +244,7 @@ app.post("/api/login", async (req, res) => {
 
   try {
     const result = await pool.query(
-      "SELECT id, email, display_name, password_hash FROM users WHERE email = $1",
+      "SELECT id, email, display_name, password_hash, account_type FROM users WHERE email = $1",
       [email]
     );
 
@@ -231,9 +263,14 @@ app.post("/api/login", async (req, res) => {
 
     return res.json({
       ok: true,
-      user: { id: user.id, email: user.email, display_name: user.display_name },
+      user: {
+        id: user.id,
+        email: user.email,
+        display_name: user.display_name,
+        account_type: user.account_type
+      },
       token,
-      redirect: "/skeleton.html"
+      redirect: "/home.html"
     });
   } catch (error) {
     console.error("Login failed:", error);
@@ -250,7 +287,7 @@ app.get("/api/users/:id", async (req, res) => {
 
   try {
     const result = await pool.query(
-      "SELECT id, email, display_name, profile_image_url FROM users WHERE id = $1",
+      "SELECT id, email, display_name, profile_image_url, account_type FROM users WHERE id = $1",
       [userId]
     );
 
@@ -340,7 +377,7 @@ app.patch("/api/profile", async (req, res) => {
         UPDATE users
         SET ${updates.join(", ")}
         WHERE id = $${index}
-        RETURNING id, email, display_name, profile_image_url
+        RETURNING id, email, display_name, profile_image_url, account_type
       `,
       values
     );

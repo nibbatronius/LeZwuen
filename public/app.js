@@ -108,7 +108,7 @@ async function submitAuth(form, endpoint) {
 
     message.textContent = "Success. Redirecting...";
     message.setAttribute("data-type", "success");
-    window.location.href = data.redirect || "/skeleton.html";
+    window.location.href = data.redirect || "/home.html";
   } catch (error) {
     message.textContent = "Network error. Please try again.";
     message.setAttribute("data-type", "error");
