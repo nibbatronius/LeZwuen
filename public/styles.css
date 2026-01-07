@@ -206,6 +206,15 @@ body::after {
   z-index: 1;
 }
 
+.app-layout-home {
+  place-items: start;
+  align-content: start;
+}
+
+.app-layout-home .post-it-grid {
+  align-content: start;
+}
+
 .post-it-grid {
   width: 100%;
   display: grid;
@@ -299,6 +308,10 @@ body::after {
   margin-bottom: 12px;
 }
 
+.post-it-header[hidden] {
+  display: none;
+}
+
 .post-it-action {
   border: 1px solid rgba(0, 0, 0, 0.2);
   background: rgba(255, 255, 255, 0.45);
@@ -318,6 +331,10 @@ body::after {
 .post-it-editor {
   display: grid;
   gap: 10px;
+}
+
+.post-it-editor[hidden] {
+  display: none;
 }
 
 .post-it-empty {
