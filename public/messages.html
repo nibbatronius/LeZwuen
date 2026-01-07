@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+    />
+    <title>LeZwuen | Messages</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="app-body">
+    <header class="site-header">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-text">LeZwuen</span>
+      </div>
+      <nav class="site-nav">
+        <a class="nav-link" href="home.html">Home</a>
+        <a class="nav-link active" href="messages.html">Messages</a>
+      </nav>
+      <div class="profile-slot">
+        <a class="avatar-link" href="profile.html" aria-label="Go to profile">
+          <img
+            class="avatar"
+            src="avatar-placeholder.svg"
+            alt="Profile avatar"
+            data-avatar-img
+          />
+        </a>
+        <label class="avatar-edit" aria-label="Upload profile photo">
+          <input class="avatar-input" type="file" accept="image/*" data-avatar-input />
+          <span aria-hidden="true">+</span>
+        </label>
+        <span class="upload-status" data-upload-status aria-live="polite"></span>
+      </div>
+    </header>
+    <main class="app-layout app-layout-messages">
+      <div class="messages-shell">
+        <aside class="messages-sidebar">
+          <section class="messages-panel-card">
+            <div class="panel-title">Add friend</div>
+            <form class="friend-form" data-friend-request-form>
+              <input
+                class="friend-input"
+                type="email"
+                placeholder="friend@email.com"
+                autocomplete="email"
+                data-friend-request-input
+              />
+              <button class="primary" type="submit">Send</button>
+            </form>
+            <div class="panel-status" data-friend-request-status aria-live="polite"></div>
+          </section>
+          <section class="messages-panel-card">
+            <div class="panel-title">Requests</div>
+            <div class="request-list" data-request-list></div>
+          </section>
+          <section class="messages-panel-card">
+            <div class="panel-title">Friends</div>
+            <div class="friend-list" data-friend-list></div>
+          </section>
+        </aside>
+        <section class="messages-panel">
+          <div class="conversation-header">
+            <div>
+              <div class="conversation-title" data-conversation-title>Select a friend</div>
+              <div class="conversation-meta" data-conversation-meta></div>
+            </div>
+            <div class="conversation-actions">
+              <select class="share-select" data-share-folder-select>
+                <option value="">Share a folder</option>
+              </select>
+            </div>
+          </div>
+          <div class="messages-list" data-messages-list></div>
+          <form class="message-form" data-message-form>
+            <textarea
+              class="message-input"
+              rows="3"
+              placeholder="Write a message..."
+              data-message-input
+            ></textarea>
+            <div class="message-actions">
+              <button class="primary" type="submit">Send</button>
+            </div>
+            <div class="panel-status" data-message-status aria-live="polite"></div>
+          </form>
+        </section>
+      </div>
+    </main>
+    <script src="config.js"></script>
+    <script src="messages.js"></script>
+    <script src="user.js"></script>
+  </body>
+</html>

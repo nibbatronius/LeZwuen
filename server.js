@@ -20,6 +20,7 @@ const pool = new Pool({
   ssl: useSsl ? { rejectUnauthorized: false } : undefined
 });
 const DEFAULT_OWNER_DISPLAY_NAME = "NibbaTronius";
+const DEFAULT_FOLDER_NAME = "General";
 const DEFAULT_POST_ITS = [
   {
     body:
@@ -66,6 +67,16 @@ async function initDb() {
   `);
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS folders (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS post_its (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -73,6 +84,67 @@ async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+  `);
+  await pool.query(
+    "ALTER TABLE post_its ADD COLUMN IF NOT EXISTS folder_id INTEGER REFERENCES folders(id) ON DELETE CASCADE;"
+  );
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS friend_requests (
+      id SERIAL PRIMARY KEY,
+      requester_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      recipient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS messages (
+      id SERIAL PRIMARY KEY,
+      sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      recipient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      body TEXT NOT NULL,
+      share_folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS folder_shares (
+      id SERIAL PRIMARY KEY,
+      folder_id INTEGER NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
+      owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      shared_with_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (folder_id, shared_with_user_id)
+    );
+  `);
+
+  await pool.query(
+    `
+      INSERT INTO folders (user_id, name)
+      SELECT users.id, $1
+      FROM users
+      WHERE NOT EXISTS (
+        SELECT 1 FROM folders WHERE folders.user_id = users.id
+      )
+    `,
+    [DEFAULT_FOLDER_NAME]
+  );
+
+  await pool.query(`
+    WITH first_folder AS (
+      SELECT user_id, MIN(id) AS id
+      FROM folders
+      GROUP BY user_id
+    )
+    UPDATE post_its
+    SET folder_id = first_folder.id
+    FROM first_folder
+    WHERE post_its.user_id = first_folder.user_id
+      AND post_its.folder_id IS NULL
   `);
 
   await syncOwnerAccount();
@@ -203,6 +275,72 @@ async function getOwnerId(ownerDisplayName) {
   return result.rows[0].id;
 }
 
+async function ensureDefaultFolderForUser(userId) {
+  const existing = await pool.query(
+    "SELECT id FROM folders WHERE user_id = $1 ORDER BY id ASC LIMIT 1",
+    [userId]
+  );
+  if (existing.rows.length) {
+    return existing.rows[0].id;
+  }
+
+  const created = await pool.query(
+    "INSERT INTO folders (user_id, name) VALUES ($1, $2) RETURNING id",
+    [userId, DEFAULT_FOLDER_NAME]
+  );
+  return created.rows[0].id;
+}
+
+async function getFolderAccess(userId, folderId) {
+  const folderResult = await pool.query(
+    `
+      SELECT folders.id, folders.name, folders.user_id, users.display_name AS owner_display_name
+      FROM folders
+      JOIN users ON users.id = folders.user_id
+      WHERE folders.id = $1
+    `,
+    [folderId]
+  );
+
+  if (!folderResult.rows.length) {
+    return null;
+  }
+
+  const folder = folderResult.rows[0];
+  if (folder.user_id === userId) {
+    return { folder, canEdit: true };
+  }
+
+  const shareResult = await pool.query(
+    "SELECT id FROM folder_shares WHERE folder_id = $1 AND shared_with_user_id = $2",
+    [folderId, userId]
+  );
+
+  if (shareResult.rows.length) {
+    return { folder, canEdit: false };
+  }
+
+  return null;
+}
+
+async function areFriends(userId, otherUserId) {
+  const result = await pool.query(
+    `
+      SELECT id
+      FROM friend_requests
+      WHERE status = 'accepted'
+        AND (
+          (requester_id = $1 AND recipient_id = $2)
+          OR
+          (requester_id = $2 AND recipient_id = $1)
+        )
+      LIMIT 1
+    `,
+    [userId, otherUserId]
+  );
+  return result.rows.length > 0;
+}
+
 async function syncOwnerAccount() {
   const ownerDisplayName = getOwnerDisplayName();
   if (!ownerDisplayName) {
@@ -236,6 +374,7 @@ async function ensureOwnerPostIts() {
     return;
   }
 
+  const folderId = await ensureDefaultFolderForUser(ownerId);
   const existing = await pool.query("SELECT id FROM post_its WHERE user_id = $1 LIMIT 1", [
     ownerId
   ]);
@@ -243,9 +382,14 @@ async function ensureOwnerPostIts() {
     return;
   }
 
-  const values = [ownerId, ...DEFAULT_POST_ITS.map((note) => note.body)];
-  const placeholders = DEFAULT_POST_ITS.map((_, index) => `($1, $${index + 2})`).join(", ");
-  await pool.query(`INSERT INTO post_its (user_id, body) VALUES ${placeholders}`, values);
+  const values = [ownerId, folderId, ...DEFAULT_POST_ITS.map((note) => note.body)];
+  const placeholders = DEFAULT_POST_ITS.map(
+    (_, index) => `($1, $2, $${index + 3})`
+  ).join(", ");
+  await pool.query(
+    `INSERT INTO post_its (user_id, folder_id, body) VALUES ${placeholders}`,
+    values
+  );
 }
 
 app.get("/healthz", (req, res) => {
@@ -280,6 +424,7 @@ app.post("/api/signup", async (req, res) => {
       [email, passwordHash, displayName]
     );
 
+    await ensureDefaultFolderForUser(result.rows[0].id);
     const token = await createSession(result.rows[0].id);
 
     return res.status(201).json({
@@ -456,7 +601,7 @@ app.patch("/api/profile", async (req, res) => {
   }
 });
 
-app.get("/api/post-its", async (req, res) => {
+app.get("/api/folders", async (req, res) => {
   const token = getTokenFromRequest(req);
 
   if (!token) {
@@ -470,12 +615,246 @@ app.get("/api/post-its", async (req, res) => {
       return res.status(401).json({ error: "Unauthorized." });
     }
 
-    const result = await pool.query(
-      "SELECT id, body, created_at, updated_at FROM post_its WHERE user_id = $1 ORDER BY created_at ASC, id ASC",
+    const ownFolders = await pool.query(
+      "SELECT id, name, created_at, updated_at FROM folders WHERE user_id = $1 ORDER BY created_at ASC, id ASC",
       [user.id]
     );
 
-    return res.json({ ok: true, postIts: result.rows });
+    const sharedFolders = await pool.query(
+      `
+        SELECT folders.id,
+               folders.name,
+               folders.user_id AS owner_id,
+               users.display_name AS owner_display_name
+        FROM folder_shares
+        JOIN folders ON folders.id = folder_shares.folder_id
+        JOIN users ON users.id = folders.user_id
+        WHERE folder_shares.shared_with_user_id = $1
+        ORDER BY folder_shares.created_at ASC, folders.id ASC
+      `,
+      [user.id]
+    );
+
+    return res.json({
+      ok: true,
+      folders: ownFolders.rows,
+      sharedFolders: sharedFolders.rows
+    });
+  } catch (error) {
+    console.error("Folder lookup failed:", error);
+    return res.status(500).json({ error: "Unable to load folders." });
+  }
+});
+
+app.post("/api/folders", async (req, res) => {
+  const token = getTokenFromRequest(req);
+  const nameInput = typeof req.body.name === "string" ? req.body.name.trim() : "";
+
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+
+  if (!nameInput) {
+    return res.status(400).json({ error: "Folder name is required." });
+  }
+
+  if (nameInput.length > 32) {
+    return res.status(400).json({ error: "Folder name is too long." });
+  }
+
+  try {
+    const user = await getUserFromToken(token);
+
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized." });
+    }
+
+    const result = await pool.query(
+      `
+        INSERT INTO folders (user_id, name)
+        VALUES ($1, $2)
+        RETURNING id, name, created_at, updated_at
+      `,
+      [user.id, nameInput]
+    );
+
+    return res.status(201).json({ ok: true, folder: result.rows[0] });
+  } catch (error) {
+    console.error("Folder create failed:", error);
+    return res.status(500).json({ error: "Unable to create folder." });
+  }
+});
+
+app.patch("/api/folders/:id", async (req, res) => {
+  const token = getTokenFromRequest(req);
+  const folderId = Number.parseInt(req.params.id, 10);
+  const nameInput = typeof req.body.name === "string" ? req.body.name.trim() : "";
+
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+
+  if (!Number.isInteger(folderId)) {
+    return res.status(400).json({ error: "Invalid folder id." });
+  }
+
+  if (!nameInput) {
+    return res.status(400).json({ error: "Folder name is required." });
+  }
+
+  if (nameInput.length > 32) {
+    return res.status(400).json({ error: "Folder name is too long." });
+  }
+
+  try {
+    const user = await getUserFromToken(token);
+
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized." });
+    }
+
+    const result = await pool.query(
+      `
+        UPDATE folders
+        SET name = $1, updated_at = NOW()
+        WHERE id = $2 AND user_id = $3
+        RETURNING id, name, created_at, updated_at
+      `,
+      [nameInput, folderId, user.id]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: "Folder not found." });
+    }
+
+    return res.json({ ok: true, folder: result.rows[0] });
+  } catch (error) {
+    console.error("Folder update failed:", error);
+    return res.status(500).json({ error: "Unable to update folder." });
+  }
+});
+
+app.delete("/api/folders/:id", async (req, res) => {
+  const token = getTokenFromRequest(req);
+  const folderId = Number.parseInt(req.params.id, 10);
+
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+
+  if (!Number.isInteger(folderId)) {
+    return res.status(400).json({ error: "Invalid folder id." });
+  }
+
+  try {
+    const user = await getUserFromToken(token);
+
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized." });
+    }
+
+    const result = await pool.query(
+      "DELETE FROM folders WHERE id = $1 AND user_id = $2 RETURNING id",
+      [folderId, user.id]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: "Folder not found." });
+    }
+
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error("Folder delete failed:", error);
+    return res.status(500).json({ error: "Unable to delete folder." });
+  }
+});
+
+app.get("/api/folders/:id/post-its", async (req, res) => {
+  const token = getTokenFromRequest(req);
+  const folderId = Number.parseInt(req.params.id, 10);
+
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+
+  if (!Number.isInteger(folderId)) {
+    return res.status(400).json({ error: "Invalid folder id." });
+  }
+
+  try {
+    const user = await getUserFromToken(token);
+
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized." });
+    }
+
+    const access = await getFolderAccess(user.id, folderId);
+    if (!access) {
+      return res.status(404).json({ error: "Folder not found." });
+    }
+
+    const result = await pool.query(
+      `
+        SELECT id, body, created_at, updated_at
+        FROM post_its
+        WHERE folder_id = $1
+        ORDER BY created_at ASC, id ASC
+      `,
+      [folderId]
+    );
+
+    return res.json({
+      ok: true,
+      postIts: result.rows,
+      canEdit: access.canEdit,
+      folder: access.folder
+    });
+  } catch (error) {
+    console.error("Post-it lookup failed:", error);
+    return res.status(500).json({ error: "Unable to load notes." });
+  }
+});
+
+app.get("/api/post-its", async (req, res) => {
+  const token = getTokenFromRequest(req);
+  const folderId = Number.parseInt(req.query.folderId, 10);
+
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+
+  if (!Number.isInteger(folderId)) {
+    return res.status(400).json({ error: "Folder id is required." });
+  }
+
+  try {
+    const user = await getUserFromToken(token);
+
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized." });
+    }
+
+    const access = await getFolderAccess(user.id, folderId);
+    if (!access) {
+      return res.status(404).json({ error: "Folder not found." });
+    }
+
+    const result = await pool.query(
+      `
+        SELECT id, body, created_at, updated_at
+        FROM post_its
+        WHERE folder_id = $1
+        ORDER BY created_at ASC, id ASC
+      `,
+      [folderId]
+    );
+
+    return res.json({
+      ok: true,
+      postIts: result.rows,
+      canEdit: access.canEdit,
+      folder: access.folder
+    });
   } catch (error) {
     console.error("Post-it lookup failed:", error);
     return res.status(500).json({ error: "Unable to load notes." });
@@ -485,9 +864,14 @@ app.get("/api/post-its", async (req, res) => {
 app.post("/api/post-its", async (req, res) => {
   const token = getTokenFromRequest(req);
   const bodyInput = typeof req.body.body === "string" ? req.body.body.trim() : "";
+  const folderId = Number.parseInt(req.body.folderId, 10);
 
   if (!token) {
     return res.status(401).json({ error: "Unauthorized." });
+  }
+
+  if (!Number.isInteger(folderId)) {
+    return res.status(400).json({ error: "Folder id is required." });
   }
 
   if (!bodyInput) {
@@ -505,13 +889,18 @@ app.post("/api/post-its", async (req, res) => {
       return res.status(401).json({ error: "Unauthorized." });
     }
 
+    const access = await getFolderAccess(user.id, folderId);
+    if (!access || !access.canEdit) {
+      return res.status(404).json({ error: "Folder not found." });
+    }
+
     const result = await pool.query(
       `
-        INSERT INTO post_its (user_id, body)
-        VALUES ($1, $2)
+        INSERT INTO post_its (user_id, folder_id, body)
+        VALUES ($1, $2, $3)
         RETURNING id, body, created_at, updated_at
       `,
-      [user.id, bodyInput]
+      [user.id, folderId, bodyInput]
     );
 
     return res.status(201).json({ ok: true, postIt: result.rows[0] });
@@ -602,6 +991,410 @@ app.delete("/api/post-its/:id", async (req, res) => {
   } catch (error) {
     console.error("Post-it delete failed:", error);
     return res.status(500).json({ error: "Unable to delete note." });
+  }
+});
+
+app.get("/api/friend-requests", async (req, res) => {
+  const token = getTokenFromRequest(req);
+
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+
+  try {
+    const user = await getUserFromToken(token);
+
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized." });
+    }
+
+    const incoming = await pool.query(
+      `
+        SELECT friend_requests.id,
+               friend_requests.requester_id,
+               users.display_name,
+               users.email
+        FROM friend_requests
+        JOIN users ON users.id = friend_requests.requester_id
+        WHERE friend_requests.recipient_id = $1
+          AND friend_requests.status = 'pending'
+        ORDER BY friend_requests.created_at ASC
+      `,
+      [user.id]
+    );
+
+    const outgoing = await pool.query(
+      `
+        SELECT friend_requests.id,
+               friend_requests.recipient_id,
+               users.display_name,
+               users.email
+        FROM friend_requests
+        JOIN users ON users.id = friend_requests.recipient_id
+        WHERE friend_requests.requester_id = $1
+          AND friend_requests.status = 'pending'
+        ORDER BY friend_requests.created_at ASC
+      `,
+      [user.id]
+    );
+
+    return res.json({ ok: true, incoming: incoming.rows, outgoing: outgoing.rows });
+  } catch (error) {
+    console.error("Friend request lookup failed:", error);
+    return res.status(500).json({ error: "Unable to load friend requests." });
+  }
+});
+
+app.post("/api/friend-requests", async (req, res) => {
+  const token = getTokenFromRequest(req);
+  const emailInput = typeof req.body.email === "string" ? req.body.email.trim().toLowerCase() : "";
+
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+
+  if (!emailInput || !emailInput.includes("@")) {
+    return res.status(400).json({ error: "Please enter a valid email." });
+  }
+
+  try {
+    const user = await getUserFromToken(token);
+
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized." });
+    }
+
+    const targetResult = await pool.query(
+      "SELECT id, display_name, email FROM users WHERE LOWER(email) = LOWER($1)",
+      [emailInput]
+    );
+
+    if (!targetResult.rows.length) {
+      return res.status(404).json({ error: "User not found." });
+    }
+
+    const targetUser = targetResult.rows[0];
+    if (targetUser.id === user.id) {
+      return res.status(400).json({ error: "You cannot add yourself." });
+    }
+
+    const existing = await pool.query(
+      `
+        SELECT id, requester_id, recipient_id, status
+        FROM friend_requests
+        WHERE (requester_id = $1 AND recipient_id = $2)
+           OR (requester_id = $2 AND recipient_id = $1)
+        LIMIT 1
+      `,
+      [user.id, targetUser.id]
+    );
+
+    if (existing.rows.length) {
+      const request = existing.rows[0];
+      if (request.status === "accepted") {
+        return res.status(409).json({ error: "You are already friends." });
+      }
+      if (request.status === "pending") {
+        if (request.requester_id === user.id) {
+          return res.status(409).json({ error: "Friend request already sent." });
+        }
+        return res
+          .status(409)
+          .json({ error: "Friend request already received. Accept it first." });
+      }
+      await pool.query(
+        `
+          UPDATE friend_requests
+          SET requester_id = $1, recipient_id = $2, status = 'pending', updated_at = NOW()
+          WHERE id = $3
+        `,
+        [user.id, targetUser.id, request.id]
+      );
+
+      return res.status(201).json({
+        ok: true,
+        request: {
+          id: request.id,
+          recipient_id: targetUser.id,
+          display_name: targetUser.display_name,
+          email: targetUser.email
+        }
+      });
+    }
+
+    const result = await pool.query(
+      `
+        INSERT INTO friend_requests (requester_id, recipient_id)
+        VALUES ($1, $2)
+        RETURNING id
+      `,
+      [user.id, targetUser.id]
+    );
+
+    return res.status(201).json({
+      ok: true,
+      request: {
+        id: result.rows[0].id,
+        recipient_id: targetUser.id,
+        display_name: targetUser.display_name,
+        email: targetUser.email
+      }
+    });
+  } catch (error) {
+    console.error("Friend request create failed:", error);
+    return res.status(500).json({ error: "Unable to send friend request." });
+  }
+});
+
+app.post("/api/friend-requests/:id/accept", async (req, res) => {
+  const token = getTokenFromRequest(req);
+  const requestId = Number.parseInt(req.params.id, 10);
+
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+
+  if (!Number.isInteger(requestId)) {
+    return res.status(400).json({ error: "Invalid request id." });
+  }
+
+  try {
+    const user = await getUserFromToken(token);
+
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized." });
+    }
+
+    const result = await pool.query(
+      `
+        UPDATE friend_requests
+        SET status = 'accepted', updated_at = NOW()
+        WHERE id = $1 AND recipient_id = $2 AND status = 'pending'
+        RETURNING id, requester_id
+      `,
+      [requestId, user.id]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: "Friend request not found." });
+    }
+
+    return res.json({ ok: true, request: result.rows[0] });
+  } catch (error) {
+    console.error("Friend request accept failed:", error);
+    return res.status(500).json({ error: "Unable to accept friend request." });
+  }
+});
+
+app.post("/api/friend-requests/:id/decline", async (req, res) => {
+  const token = getTokenFromRequest(req);
+  const requestId = Number.parseInt(req.params.id, 10);
+
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+
+  if (!Number.isInteger(requestId)) {
+    return res.status(400).json({ error: "Invalid request id." });
+  }
+
+  try {
+    const user = await getUserFromToken(token);
+
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized." });
+    }
+
+    const result = await pool.query(
+      `
+        UPDATE friend_requests
+        SET status = 'declined', updated_at = NOW()
+        WHERE id = $1 AND recipient_id = $2 AND status = 'pending'
+        RETURNING id
+      `,
+      [requestId, user.id]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: "Friend request not found." });
+    }
+
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error("Friend request decline failed:", error);
+    return res.status(500).json({ error: "Unable to decline friend request." });
+  }
+});
+
+app.get("/api/friends", async (req, res) => {
+  const token = getTokenFromRequest(req);
+
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+
+  try {
+    const user = await getUserFromToken(token);
+
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized." });
+    }
+
+    const result = await pool.query(
+      `
+        SELECT
+          users.id,
+          users.display_name,
+          users.email,
+          users.profile_image_url
+        FROM friend_requests
+        JOIN users ON users.id =
+          CASE
+            WHEN friend_requests.requester_id = $1 THEN friend_requests.recipient_id
+            ELSE friend_requests.requester_id
+          END
+        WHERE friend_requests.status = 'accepted'
+          AND (friend_requests.requester_id = $1 OR friend_requests.recipient_id = $1)
+        ORDER BY users.display_name ASC
+      `,
+      [user.id]
+    );
+
+    return res.json({ ok: true, friends: result.rows });
+  } catch (error) {
+    console.error("Friend list lookup failed:", error);
+    return res.status(500).json({ error: "Unable to load friends." });
+  }
+});
+
+app.get("/api/messages/:userId", async (req, res) => {
+  const token = getTokenFromRequest(req);
+  const otherUserId = Number.parseInt(req.params.userId, 10);
+
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+
+  if (!Number.isInteger(otherUserId)) {
+    return res.status(400).json({ error: "Invalid user id." });
+  }
+
+  try {
+    const user = await getUserFromToken(token);
+
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized." });
+    }
+
+    const friends = await areFriends(user.id, otherUserId);
+    if (!friends) {
+      return res.status(403).json({ error: "You can only message friends." });
+    }
+
+    const result = await pool.query(
+      `
+        SELECT messages.id,
+               messages.body,
+               messages.sender_id,
+               messages.recipient_id,
+               messages.share_folder_id,
+               messages.created_at,
+               folders.name AS share_folder_name
+        FROM messages
+        LEFT JOIN folders ON folders.id = messages.share_folder_id
+        WHERE (messages.sender_id = $1 AND messages.recipient_id = $2)
+           OR (messages.sender_id = $2 AND messages.recipient_id = $1)
+        ORDER BY messages.created_at ASC, messages.id ASC
+        LIMIT 200
+      `,
+      [user.id, otherUserId]
+    );
+
+    return res.json({ ok: true, messages: result.rows });
+  } catch (error) {
+    console.error("Message lookup failed:", error);
+    return res.status(500).json({ error: "Unable to load messages." });
+  }
+});
+
+app.post("/api/messages", async (req, res) => {
+  const token = getTokenFromRequest(req);
+  const bodyInput = typeof req.body.body === "string" ? req.body.body.trim() : "";
+  const recipientId = Number.parseInt(req.body.recipientId, 10);
+  const shareFolderId = Number.parseInt(req.body.shareFolderId, 10);
+
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+
+  if (!Number.isInteger(recipientId)) {
+    return res.status(400).json({ error: "Recipient is required." });
+  }
+
+  if (!bodyInput && !Number.isInteger(shareFolderId)) {
+    return res.status(400).json({ error: "Message cannot be empty." });
+  }
+
+  if (bodyInput.length > 4000) {
+    return res.status(400).json({ error: "Message is too long." });
+  }
+
+  try {
+    const user = await getUserFromToken(token);
+
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized." });
+    }
+
+    const friends = await areFriends(user.id, recipientId);
+    if (!friends) {
+      return res.status(403).json({ error: "You can only message friends." });
+    }
+
+    let shareFolderName = null;
+    let shareFolderValue = null;
+    if (Number.isInteger(shareFolderId)) {
+      const folderResult = await pool.query(
+        "SELECT id, name FROM folders WHERE id = $1 AND user_id = $2",
+        [shareFolderId, user.id]
+      );
+
+      if (!folderResult.rows.length) {
+        return res.status(404).json({ error: "Folder not found." });
+      }
+
+      shareFolderValue = folderResult.rows[0].id;
+      shareFolderName = folderResult.rows[0].name;
+
+      await pool.query(
+        `
+          INSERT INTO folder_shares (folder_id, owner_id, shared_with_user_id)
+          VALUES ($1, $2, $3)
+          ON CONFLICT (folder_id, shared_with_user_id) DO NOTHING
+        `,
+        [shareFolderId, user.id, recipientId]
+      );
+    }
+
+    const result = await pool.query(
+      `
+        INSERT INTO messages (sender_id, recipient_id, body, share_folder_id)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id, body, sender_id, recipient_id, share_folder_id, created_at
+      `,
+      [user.id, recipientId, bodyInput || "", shareFolderValue]
+    );
+
+    return res.status(201).json({
+      ok: true,
+      message: {
+        ...result.rows[0],
+        share_folder_name: shareFolderName
+      }
+    });
+  } catch (error) {
+    console.error("Message send failed:", error);
+    return res.status(500).json({ error: "Unable to send message." });
   }
 });
 
