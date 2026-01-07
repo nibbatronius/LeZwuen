@@ -1,12 +1,14 @@
-const apiBaseUrl = window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL ? window.APP_CONFIG.API_BASE_URL : "";
-const grid = document.querySelector("[data-post-it-grid]");
-const composeSection = document.querySelector("[data-post-it-compose]");
-const form = document.querySelector("[data-post-it-form]");
-const input = document.querySelector("[data-post-it-input]");
-const clearButton = document.querySelector("[data-post-it-clear]");
-const composeStatus = document.querySelector("[data-post-it-status]");
-const emptyState = document.querySelector("[data-post-it-empty]");
-let postItCount = 0;
+(() => {
+  const apiBaseUrl =
+    window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL ? window.APP_CONFIG.API_BASE_URL : "";
+  const grid = document.querySelector("[data-post-it-grid]");
+  const composeSection = document.querySelector("[data-post-it-compose]");
+  const form = document.querySelector("[data-post-it-form]");
+  const input = document.querySelector("[data-post-it-input]");
+  const clearButton = document.querySelector("[data-post-it-clear]");
+  const composeStatus = document.querySelector("[data-post-it-status]");
+  const emptyState = document.querySelector("[data-post-it-empty]");
+  let postItCount = 0;
 
 function apiUrl(path) {
   if (!apiBaseUrl) {
@@ -390,4 +392,5 @@ if (form) {
   });
 }
 
-loadPostIts();
+  loadPostIts();
+})();
