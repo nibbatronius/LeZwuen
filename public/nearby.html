@@ -32,20 +32,20 @@
       <aside class="nearby-sidebar">
         <div class="nearby-sidebar-header">
           <h2>Nearby</h2>
-          <p>Distance rooms</p>
+          <p>Location-based rooms</p>
         </div>
         <div class="nearby-status" data-location-status>
-          Share your location to unlock nearby rooms.
+          Share your location to unlock nearby rooms. Your exact position stays private.
         </div>
-        <button class="ghost" type="button" data-share-location>Share location</button>
+        <button class="ghost" type="button" data-share-location>Share location securely</button>
         <div class="room-list" data-room-list></div>
       </aside>
 
       <section class="nearby-chat">
         <header class="chat-header">
           <div>
-            <h2 data-room-title>Choose a room</h2>
-            <p data-room-subtitle>Distance buckets keep your exact location private.</p>
+            <h2 data-room-title>Select a room</h2>
+            <p data-room-subtitle>Distance buckets protect your exact location.</p>
           </div>
           <div class="chat-meta">
             <span class="presence-dot"></span>
@@ -59,7 +59,7 @@
           <input
             type="text"
             name="message"
-            placeholder="Message the room (no buy/sell/trade)"
+            placeholder="Send a message (no buy/sell/trade)"
             autocomplete="off"
             maxlength="500"
             required
@@ -71,13 +71,13 @@
 
     <div class="age-gate" data-age-gate hidden>
       <div class="age-card">
-        <h2>Confirm your age</h2>
-        <p>You must be 18+ to access Nearby chat.</p>
+        <h2>Age verification</h2>
+        <p>You must be 18 or older to access Nearby chat.</p>
         <label class="age-check">
           <input type="checkbox" data-age-checkbox />
-          I confirm I am 18 or older.
+          I confirm that I am 18 or older.
         </label>
-        <button class="primary" type="button" data-age-confirm>Continue</button>
+        <button class="primary" type="button" data-age-confirm>Confirm</button>
       </div>
     </div>
 
