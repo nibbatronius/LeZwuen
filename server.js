@@ -54,16 +54,6 @@ const uploadDir = process.env.UPLOAD_DIR || path.join(__dirname, "public", "uplo
 fs.mkdirSync(uploadDir, { recursive: true });
 
 app.use(express.json({ limit: "2mb" }));
-
-app.get("/config.js", (req, res) => {
-  const payload = {
-    API_BASE_URL: process.env.API_BASE_URL || "",
-    PROFIT_CALC_URL: process.env.PROFIT_CALC_URL || ""
-  };
-  res.setHeader("Cache-Control", "no-store");
-  res.type("application/javascript").send(`window.APP_CONFIG = ${JSON.stringify(payload)};`);
-});
-
 app.use(express.static(path.join(__dirname, "public")));
 app.use("/uploads", express.static(uploadDir));
 
