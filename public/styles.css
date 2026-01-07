@@ -206,6 +206,37 @@ body::after {
   z-index: 1;
 }
 
+.post-it-grid {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 28px;
+  align-items: start;
+}
+
+.post-it {
+  width: min(520px, 100%);
+  padding: 28px 30px;
+  border-radius: 14px 14px 22px 14px;
+  background: linear-gradient(140deg, #f6e6a6 0%, #f1d37b 100%);
+  color: #1a1a1a;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  transform: rotate(-1.5deg);
+}
+
+.post-it-alt {
+  background: linear-gradient(140deg, #f3d7b4 0%, #eab98b 100%);
+  transform: rotate(1.2deg);
+}
+
+.post-it-text {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.6;
+  letter-spacing: 0.01em;
+}
+
 .age-gate {
   position: fixed;
   inset: 0;
