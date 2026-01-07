@@ -6,7 +6,7 @@
       name="viewport"
       content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
     />
-    <title>LeZwuen</title>
+    <title>LeZwuen | Profit Calculator</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body class="app-body">
@@ -16,16 +16,11 @@
         <span class="brand-text">LeZwuen</span>
       </div>
       <nav class="site-nav">
-        <a class="nav-link" href="profit-calculator.html">Profit Calculator</a>
+        <a class="nav-link active" href="profit-calculator.html">Profit Calculator</a>
       </nav>
       <div class="profile-slot">
         <a class="avatar-link" href="profile.html" aria-label="Go to profile">
-          <img
-            class="avatar"
-            src="avatar-placeholder.svg"
-            alt="Profile avatar"
-            data-avatar-img
-          />
+          <img class="avatar" src="avatar-placeholder.svg" alt="Profile avatar" data-avatar-img />
         </a>
         <label class="avatar-edit" aria-label="Upload profile photo">
           <input class="avatar-input" type="file" accept="image/*" data-avatar-input />
@@ -34,8 +29,32 @@
         <span class="upload-status" data-upload-status aria-live="polite"></span>
       </div>
     </header>
-    <main class="app-layout"></main>
+
+    <main class="app-layout">
+      <section class="embed-card">
+        <div class="embed-header">
+          <div>
+            <h1>Profit Calculator</h1>
+            <p>Live financial modeling via the embedded calculator service.</p>
+          </div>
+          <a class="ghost" href="profile.html">Back to profile</a>
+        </div>
+        <div class="embed-frame">
+          <div class="embed-placeholder" data-embed-placeholder>
+            Set `PROFIT_CALC_URL` in `public/config.js` to load the calculator.
+          </div>
+          <iframe
+            title="Profit calculator"
+            data-profit-embed
+            loading="lazy"
+            referrerpolicy="no-referrer"
+          ></iframe>
+        </div>
+      </section>
+    </main>
+
     <script src="config.js"></script>
+    <script src="embed.js"></script>
     <script src="user.js"></script>
   </body>
 </html>
