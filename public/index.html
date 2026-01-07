@@ -2,7 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+    />
     <title>LeZwuen Forum | Mushroom Grove</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
@@ -41,6 +44,17 @@
         </form>
       </section>
     </main>
+    <div class="age-gate" data-age-gate hidden>
+      <div class="age-card">
+        <h2>Age verification</h2>
+        <p>You must be 18 or older to create a LeZwuen account.</p>
+        <label class="age-check">
+          <input type="checkbox" data-age-checkbox />
+          I confirm that I am 18 or older.
+        </label>
+        <button class="primary" type="button" data-age-confirm>Continue</button>
+      </div>
+    </div>
     <script src="config.js"></script>
     <script src="app.js"></script>
   </body>

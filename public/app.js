@@ -1,12 +1,48 @@
 const tabs = document.querySelectorAll(".tab");
 const forms = document.querySelectorAll(".auth-form");
+const ageGate = document.querySelector("[data-age-gate]");
+const ageCheckbox = document.querySelector("[data-age-checkbox]");
+const ageConfirm = document.querySelector("[data-age-confirm]");
+const ageStorageKey = "lezwuenAgeConfirmed";
 const apiBaseUrl = window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL ? window.APP_CONFIG.API_BASE_URL : "";
+let pendingSignupForm = null;
 
 function apiUrl(path) {
   if (!apiBaseUrl) {
     return path;
   }
   return new URL(path, apiBaseUrl).toString();
+}
+
+function isAgeConfirmed() {
+  return localStorage.getItem(ageStorageKey) === "true";
+}
+
+function showAgeGate() {
+  if (ageGate) {
+    ageGate.hidden = false;
+  }
+}
+
+function hideAgeGate() {
+  if (ageGate) {
+    ageGate.hidden = true;
+  }
+}
+
+async function confirmAgeWithServer(token) {
+  if (!token) {
+    return;
+  }
+
+  try {
+    await fetch(apiUrl("/api/age-gate"), {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+  } catch (error) {
+    // Best-effort: age gate can be confirmed later if needed.
+  }
 }
 
 function setMode(mode) {
@@ -54,6 +90,10 @@ async function submitAuth(form, endpoint) {
       localStorage.setItem("lezwuenAuthToken", data.token);
     }
 
+    if (endpoint === "/api/signup" && data.token && isAgeConfirmed()) {
+      await confirmAgeWithServer(data.token);
+    }
+
     message.textContent = "Success. Redirecting...";
     message.setAttribute("data-type", "success");
     window.location.href = data.redirect || "/skeleton.html";
@@ -77,7 +117,43 @@ document.getElementById("login-form").addEventListener("submit", (event) => {
 
 document.getElementById("signup-form").addEventListener("submit", (event) => {
   event.preventDefault();
-  submitAuth(event.currentTarget, "/api/signup");
+  const form = event.currentTarget;
+  const message = form.querySelector(".form-message");
+
+  if (!isAgeConfirmed()) {
+    pendingSignupForm = form;
+    if (message) {
+      message.textContent = "Age verification is required to create an account.";
+      message.setAttribute("data-type", "error");
+    }
+    showAgeGate();
+    return;
+  }
+
+  submitAuth(form, "/api/signup");
 });
+
+if (ageConfirm) {
+  ageConfirm.addEventListener("click", () => {
+    if (!ageCheckbox || !ageCheckbox.checked) {
+      const message = pendingSignupForm
+        ? pendingSignupForm.querySelector(".form-message")
+        : null;
+      if (message) {
+        message.textContent = "Please confirm your age to continue.";
+        message.setAttribute("data-type", "error");
+      }
+      return;
+    }
+
+    localStorage.setItem(ageStorageKey, "true");
+    hideAgeGate();
+
+    if (pendingSignupForm) {
+      submitAuth(pendingSignupForm, "/api/signup");
+      pendingSignupForm = null;
+    }
+  });
+}
 
 setMode("login");
