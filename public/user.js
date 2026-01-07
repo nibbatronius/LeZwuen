@@ -78,6 +78,20 @@ function updateAvatar(url) {
   });
 }
 
+function syncProfileFromStorage() {
+  const storedUser = getStoredUser();
+  if (storedUser) {
+    updateProfileFields(storedUser);
+    if (storedUser.profile_image_url) {
+      updateAvatar(storedUser.profile_image_url);
+    } else {
+      updateAvatar(defaultAvatar);
+    }
+  } else {
+    updateAvatar(defaultAvatar);
+  }
+}
+
 function updateProfileFields(user) {
   if (!user) {
     return;
@@ -130,11 +144,7 @@ function getStoredUser() {
 
 async function loadProfile() {
   const token = getAuthToken();
-  updateAvatar(defaultAvatar);
-  const storedUser = getStoredUser();
-  if (storedUser) {
-    updateProfileFields(storedUser);
-  }
+  syncProfileFromStorage();
 
   if (!token) {
     return;
@@ -149,6 +159,8 @@ async function loadProfile() {
     if (response.ok && data.user) {
       if (data.user.profile_image_url) {
         updateAvatar(data.user.profile_image_url);
+      } else {
+        updateAvatar(defaultAvatar);
       }
       setStoredUser(data.user);
       updateProfileFields(data.user);
@@ -196,6 +208,11 @@ async function uploadAvatar(file) {
       }
 
       updateAvatar(data.url);
+      const storedUser = getStoredUser();
+      if (storedUser) {
+        storedUser.profile_image_url = data.url;
+        setStoredUser(storedUser);
+      }
       setStatus("Saved.", "success");
     } catch (error) {
       setStatus("Upload failed.", "error");
@@ -347,6 +364,23 @@ avatarImages.forEach((img) => {
       img.src = defaultAvatar;
     }
   });
+});
+
+window.addEventListener("storage", (event) => {
+  if (event.key === "lezwuenUser" || event.key === "lezwuenAuthToken") {
+    syncProfileFromStorage();
+    if (event.key === "lezwuenAuthToken" && event.newValue) {
+      loadProfile();
+    }
+  }
+});
+
+window.addEventListener("pageshow", () => {
+  if (getAuthToken()) {
+    loadProfile();
+  } else {
+    syncProfileFromStorage();
+  }
 });
 
 loadProfile();

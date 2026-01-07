@@ -8,15 +8,19 @@ const chatForm = document.querySelector("[data-chat-form]");
 const ageGate = document.querySelector("[data-age-gate]");
 const ageCheckbox = document.querySelector("[data-age-checkbox]");
 const ageConfirm = document.querySelector("[data-age-confirm]");
+const heatMapVisual = document.querySelector("[data-heat-map-visual]");
+const heatMapCount = document.querySelector("[data-heat-map-count]");
 
 const apiBaseUrl = window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL ? window.APP_CONFIG.API_BASE_URL : "";
 const presenceIntervalMs = 45000;
+const roomsRefreshIntervalMs = 20000;
 
 let currentRoom = null;
 let roomsCache = [];
 let presenceTimer = null;
 let pendingLocation = null;
 const blockedIds = new Set();
+let roomsRefreshTimer = null;
 
 function apiUrl(path) {
   if (!apiBaseUrl) {
@@ -67,7 +71,7 @@ function hideAgeGate() {
 
 function setRoomHeader(room) {
   if (roomTitle) {
-    roomTitle.textContent = room ? room.label : "Nearby chat";
+    roomTitle.textContent = "Nearby chat";
   }
   if (roomSubtitle) {
     roomSubtitle.textContent = room
@@ -82,6 +86,70 @@ function setRoomHeader(room) {
 function formatActiveCount(count) {
   const safeCount = Number.isFinite(count) ? count : 0;
   return safeCount === 1 ? "1 active" : `${safeCount} active`;
+}
+
+function ensureHeatCells() {
+  if (!heatMapVisual) {
+    return [];
+  }
+
+  const totalCells = 24;
+  if (heatMapVisual.children.length === totalCells) {
+    return Array.from(heatMapVisual.children);
+  }
+
+  heatMapVisual.textContent = "";
+  const cells = [];
+  for (let i = 0; i < totalCells; i += 1) {
+    const cell = document.createElement("div");
+    cell.className = "heat-cell";
+    cell.style.setProperty("--heat", "0.15");
+    heatMapVisual.append(cell);
+    cells.push(cell);
+  }
+  return cells;
+}
+
+function updateHeatMap(rooms) {
+  if (!heatMapVisual) {
+    return;
+  }
+
+  const totalActive = Array.isArray(rooms)
+    ? rooms.reduce((sum, room) => sum + (Number(room.activeCount) || 0), 0)
+    : 0;
+  if (heatMapCount) {
+    heatMapCount.textContent = formatActiveCount(totalActive);
+  }
+
+  const cells = ensureHeatCells();
+  const rows = 4;
+  const cols = 6;
+  const maxDist = Math.hypot(rows - 1, cols - 1);
+  const activityFactor = Math.min(1, totalActive / 12);
+
+  cells.forEach((cell, index) => {
+    const row = Math.floor(index / cols);
+    const col = index % cols;
+    const dist = Math.hypot(row - (rows - 1) / 2, col - (cols - 1) / 2);
+    const base = Math.max(0, 1 - dist / maxDist);
+    const noise = Math.random() * 0.35;
+    const intensity = Math.min(1, base * 0.55 + activityFactor * 0.75 + noise);
+    cell.style.setProperty("--heat", intensity.toFixed(2));
+  });
+}
+
+function updateCurrentRoomPresence() {
+  if (!currentRoom || !Array.isArray(roomsCache)) {
+    return;
+  }
+
+  const latestRoom = roomsCache.find((room) => room.roomKey === currentRoom.roomKey);
+  if (latestRoom) {
+    currentRoom = { ...currentRoom, activeCount: latestRoom.activeCount };
+  }
+
+  setRoomHeader(currentRoom);
 }
 
 async function apiRequest(path, options = {}) {
@@ -277,7 +345,8 @@ function shareLocation() {
   );
 }
 
-async function loadRooms() {
+async function loadRooms(options = {}) {
+  const { allowAutoSelect = true } = options;
   const token = getAuthToken();
   if (!token) {
     setStatus("Please sign in to view nearby chat.", "error");
@@ -304,6 +373,7 @@ async function loadRooms() {
     }
 
     roomsCache = Array.isArray(data.rooms) ? data.rooms : [];
+    updateHeatMap(roomsCache);
 
     if (!roomsCache.length) {
       setStatus("No nearby chat available yet.", "info");
@@ -315,8 +385,27 @@ async function loadRooms() {
       return;
     }
 
-    const closestRoom = roomsCache[0];
-    await selectRoom(closestRoom);
+    const roomExists = currentRoom
+      ? roomsCache.some((room) => room.roomKey === currentRoom.roomKey)
+      : false;
+
+    if (!roomExists && currentRoom) {
+      currentRoom = null;
+      setRoomHeader(null);
+      if (presenceTimer) {
+        clearInterval(presenceTimer);
+        presenceTimer = null;
+      }
+    }
+
+    updateCurrentRoomPresence();
+
+    if (allowAutoSelect && !roomExists) {
+      const closestRoom = roomsCache[0];
+      await selectRoom(closestRoom);
+    }
+
+    startRoomsRefresh();
   } catch (error) {
     setStatus("Unable to load nearby chat.", "error");
   }
@@ -341,6 +430,7 @@ async function selectRoom(room) {
 
   currentRoom = room;
   setRoomHeader(room);
+  updateHeatMap(roomsCache);
   await joinRoom(room.roomKey);
   await loadMessages(room.roomKey);
   startPresence(room.roomKey);
@@ -510,6 +600,28 @@ function startPresence(roomKey) {
   }, presenceIntervalMs);
 }
 
+function stopRoomsRefresh() {
+  if (roomsRefreshTimer) {
+    clearInterval(roomsRefreshTimer);
+    roomsRefreshTimer = null;
+  }
+}
+
+function startRoomsRefresh() {
+  if (roomsRefreshTimer) {
+    return;
+  }
+
+  roomsRefreshTimer = setInterval(() => {
+    if (!getAuthToken()) {
+      stopRoomsRefresh();
+      return;
+    }
+
+    loadRooms({ allowAutoSelect: false }).catch(() => {});
+  }, roomsRefreshIntervalMs);
+}
+
 if (shareButton) {
   shareButton.addEventListener("click", shareLocation);
 }
@@ -558,4 +670,6 @@ if (ageConfirm) {
 setRoomHeader(null);
 if (getAuthToken()) {
   loadBlocklist().then(loadRooms);
+} else {
+  updateHeatMap([]);
 }

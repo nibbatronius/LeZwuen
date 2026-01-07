@@ -311,6 +311,77 @@ body::after {
   gap: 16px;
 }
 
+.heat-map {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: rgba(6, 10, 8, 0.55);
+}
+
+.heat-map-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.heat-map-header h3 {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--ink);
+}
+
+.heat-map-visual {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+  border-radius: 14px;
+  padding: 12px;
+  background: radial-gradient(circle at 20% 20%, rgba(140, 247, 196, 0.08), transparent 55%),
+    radial-gradient(circle at 80% 30%, rgba(225, 180, 106, 0.08), transparent 60%),
+    rgba(7, 10, 8, 0.7);
+  overflow: hidden;
+}
+
+.heat-map-visual::after {
+  content: "";
+  position: absolute;
+  inset: -40%;
+  background: radial-gradient(circle, rgba(140, 247, 196, 0.18) 0%, transparent 60%);
+  opacity: 0.5;
+  animation: heatPulse 6s ease-in-out infinite;
+}
+
+.heat-cell {
+  position: relative;
+  padding-top: 100%;
+  border-radius: 10px;
+  background: rgba(14, 22, 18, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  overflow: hidden;
+}
+
+.heat-cell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle, rgba(140, 247, 196, calc(var(--heat) * 0.55)) 0%, transparent 70%);
+  opacity: calc(var(--heat) * 0.9);
+}
+
+.heat-cell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle, rgba(225, 180, 106, calc(var(--heat) * 0.35)) 0%, transparent 75%);
+  opacity: calc(var(--heat) * 0.7);
+}
+
 .chat-empty {
   color: var(--muted);
   font-size: 0.9rem;
@@ -644,6 +715,16 @@ input:focus {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes heatPulse {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(2%, -2%, 0) scale(1.05);
   }
 }
 
