@@ -207,6 +207,7 @@ body::after {
   z-index: 1;
 }
 
+
 .profile-card {
   width: min(420px, 100%);
   background: linear-gradient(165deg, rgba(16, 22, 18, 0.92), rgba(7, 12, 10, 0.82));

@@ -11,6 +11,26 @@ function apiUrl(path) {
   return new URL(path, apiBaseUrl).toString();
 }
 
+function normalizeAvatarUrl(url) {
+  if (!url) {
+    return defaultAvatar;
+  }
+
+  if (/^https?:\/\//i.test(url) || url.startsWith("data:")) {
+    return url;
+  }
+
+  if (url.startsWith("/")) {
+    return apiUrl(url);
+  }
+
+  if (url.startsWith("uploads/")) {
+    return apiUrl(`/${url}`);
+  }
+
+  return apiUrl(`/uploads/${url}`);
+}
+
 function setStatus(message, type) {
   if (!uploadStatus) {
     return;
@@ -25,7 +45,7 @@ function setStatus(message, type) {
 }
 
 function updateAvatar(url) {
-  const nextUrl = url || defaultAvatar;
+  const nextUrl = normalizeAvatarUrl(url);
   avatarImages.forEach((img) => {
     img.src = nextUrl;
   });
@@ -130,5 +150,13 @@ if (avatarInput) {
     event.target.value = "";
   });
 }
+
+avatarImages.forEach((img) => {
+  img.addEventListener("error", () => {
+    if (!img.src.includes(defaultAvatar)) {
+      img.src = defaultAvatar;
+    }
+  });
+});
 
 loadProfile();

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>LeZwuen Forum</title>
+    <title>LeZwuen Forum | Code of Conduct</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body class="app-body">
@@ -14,16 +14,11 @@
       </div>
       <nav class="site-nav">
         <a class="nav-link" href="nearby.html">Nearby</a>
-        <a class="nav-link" href="code-of-conduct.html">Code of Conduct</a>
+        <a class="nav-link active" href="code-of-conduct.html">Code of Conduct</a>
       </nav>
       <div class="profile-slot">
         <a class="avatar-link" href="profile.html" aria-label="Go to profile">
-          <img
-            class="avatar"
-            src="avatar-placeholder.svg"
-            alt="Profile avatar"
-            data-avatar-img
-          />
+          <img class="avatar" src="avatar-placeholder.svg" alt="Profile avatar" data-avatar-img />
         </a>
         <label class="avatar-edit" aria-label="Upload profile photo">
           <input class="avatar-input" type="file" accept="image/*" data-avatar-input />
@@ -32,7 +27,22 @@
         <span class="upload-status" data-upload-status aria-live="polite"></span>
       </div>
     </header>
-    <main class="app-layout"></main>
+
+    <main class="app-layout">
+      <section class="policy-card">
+        <h1>Code of Conduct</h1>
+        <p>LeZwuen is a local-first forum. Keep it respectful, safe, and community-minded.</p>
+        <ol>
+          <li>Be kind and assume good intent.</li>
+          <li>No buy, sell, or trade posts in Nearby rooms.</li>
+          <li>Do not share precise locations or personal data.</li>
+          <li>Report harmful behavior or unsafe content.</li>
+          <li>Respect blocks; do not evade or harass.</li>
+        </ol>
+        <p>If you see something wrong, use the Report action in chat.</p>
+      </section>
+    </main>
+
     <script src="config.js"></script>
     <script src="user.js"></script>
   </body>
