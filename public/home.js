@@ -24,6 +24,10 @@
   let sharedFolders = [];
   let selectedFolderId = null;
   let selectedFolderType = "own";
+  let currentUserId = null;
+  let cryptoReady = false;
+  let privateKey = null;
+  let publicKey = null;
 
   function apiUrl(path) {
     if (!apiBaseUrl) {
@@ -34,6 +38,124 @@
 
   function getAuthToken() {
     return localStorage.getItem("lezwuenAuthToken");
+  }
+
+  function loadCurrentUser() {
+    const stored = localStorage.getItem("lezwuenUser");
+    if (!stored) {
+      currentUserId = null;
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(stored);
+      currentUserId = parsed && parsed.id ? parsed.id : null;
+    } catch (error) {
+      currentUserId = null;
+    }
+  }
+
+  function folderKeyInfo(folderId, ownerId, recipientId) {
+    return `folder:${folderId}:${ownerId}:${recipientId}`;
+  }
+
+  async function initCrypto() {
+    if (!window.LeZwuenCrypto) {
+      cryptoReady = false;
+      return false;
+    }
+
+    privateKey = await window.LeZwuenCrypto.getPrivateKey();
+    publicKey = await window.LeZwuenCrypto.getPublicKey();
+    cryptoReady = Boolean(privateKey && publicKey);
+    return cryptoReady;
+  }
+
+  async function getFolderAesKey(folderId) {
+    if (!cryptoReady || !window.LeZwuenCrypto) {
+      return null;
+    }
+
+    const storedKey = window.LeZwuenCrypto.getFolderKey(folderId);
+    if (!storedKey) {
+      return null;
+    }
+
+    return window.LeZwuenCrypto.importAesKey(storedKey);
+  }
+
+  async function ensureFolderKey(folder, isShared) {
+    if (!cryptoReady || !window.LeZwuenCrypto || !currentUserId) {
+      return false;
+    }
+
+    const existingKey = window.LeZwuenCrypto.getFolderKey(folder.id);
+    if (existingKey) {
+      return true;
+    }
+
+    const ownerId = isShared ? folder.owner_id : currentUserId;
+    const ownerPublicKey = isShared
+      ? folder.owner_public_key
+      : window.LeZwuenCrypto.getStoredPublicKey();
+    if (!ownerId || !ownerPublicKey) {
+      return false;
+    }
+
+    const ownerPublicKeyObj = await window.LeZwuenCrypto.importPublicKey(ownerPublicKey);
+    const sharedKey = await window.LeZwuenCrypto.deriveSharedKey(
+      privateKey,
+      ownerPublicKeyObj,
+      folderKeyInfo(folder.id, ownerId, currentUserId)
+    );
+
+    if (folder.encrypted_key && folder.key_iv) {
+      try {
+        const rawKey = await window.LeZwuenCrypto.decryptRaw(
+          folder.encrypted_key,
+          folder.key_iv,
+          sharedKey
+        );
+        const rawKeyBase64 = window.LeZwuenCrypto.arrayBufferToBase64(rawKey);
+        window.LeZwuenCrypto.storeFolderKey(folder.id, rawKeyBase64);
+        return true;
+      } catch (error) {
+        return false;
+      }
+    }
+
+    if (!isShared) {
+      const rawKeyBase64 = await window.LeZwuenCrypto.generateFolderKey();
+      const encrypted = await window.LeZwuenCrypto.encryptRaw(
+        window.LeZwuenCrypto.base64ToArrayBuffer(rawKeyBase64),
+        sharedKey
+      );
+      const token = getAuthToken();
+      if (!token) {
+        return false;
+      }
+
+      try {
+        await fetch(apiUrl(`/api/folders/${folder.id}/key`), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            encryptedKey: encrypted.ciphertext,
+            keyIv: encrypted.iv,
+            keyVersion: 1
+          })
+        });
+        window.LeZwuenCrypto.storeFolderKey(folder.id, rawKeyBase64);
+        return true;
+      } catch (error) {
+        return false;
+      }
+    }
+
+    return false;
   }
 
   function setStatus(element, message, type) {
@@ -136,6 +258,30 @@
     });
   }
 
+  async function resolvePostBody(postIt, folderId) {
+    if (postIt.body_ciphertext && postIt.body_iv) {
+      if (!cryptoReady || !window.LeZwuenCrypto) {
+        return "[Encrypted note]";
+      }
+
+      try {
+        const folderKey = await getFolderAesKey(folderId);
+        if (!folderKey) {
+          return "[Encrypted note]";
+        }
+        return await window.LeZwuenCrypto.decryptText(
+          postIt.body_ciphertext,
+          postIt.body_iv,
+          folderKey
+        );
+      } catch (error) {
+        return "[Encrypted note]";
+      }
+    }
+
+    return String(postIt.body || "");
+  }
+
   function clearPostIts() {
     if (!grid) {
       return;
@@ -165,7 +311,7 @@
     }
   }
 
-  function createPostIt(postIt, index, canEdit) {
+  async function createPostIt(postIt, index, canEdit, folderId) {
     const section = document.createElement("section");
     section.className = "post-it";
     if (index % 2 === 1) {
@@ -177,7 +323,7 @@
     const body = document.createElement("p");
     body.className = "post-it-text";
 
-    let currentBody = String(postIt.body || "");
+    let currentBody = await resolvePostBody(postIt, folderId);
     renderPostBody(currentBody, body);
 
     if (!canEdit) {
@@ -253,6 +399,11 @@
         return;
       }
 
+      if (!cryptoReady) {
+        setStatus(status, "Re-login to unlock encryption.", "error");
+        return;
+      }
+
       const nextBody = textarea.value.trim();
       if (!nextBody) {
         setStatus(status, "Note cannot be empty.", "error");
@@ -270,13 +421,24 @@
       setStatus(status, "Saving...");
 
       try {
+        const folderKey = await getFolderAesKey(folderId);
+        if (!folderKey) {
+          setStatus(status, "Unable to unlock note.", "error");
+          return;
+        }
+        const encrypted = await window.LeZwuenCrypto.encryptText(nextBody, folderKey);
         const response = await fetch(apiUrl(`/api/post-its/${postIt.id}`), {
           method: "PATCH",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`
           },
-          body: JSON.stringify({ body: nextBody })
+          body: JSON.stringify({
+            body: "",
+            bodyCiphertext: encrypted.ciphertext,
+            bodyIv: encrypted.iv,
+            bodyVersion: 1
+          })
         });
         const data = await response.json().catch(() => ({}));
 
@@ -285,7 +447,10 @@
           return;
         }
 
-        currentBody = data.postIt && data.postIt.body ? data.postIt.body : nextBody;
+        currentBody = await resolvePostBody(
+          data.postIt || { body: nextBody },
+          folderId
+        );
         renderPostBody(currentBody, body);
         editor.hidden = true;
         body.hidden = false;
@@ -331,8 +496,8 @@
     return section;
   }
 
-  function appendPostIt(postIt, canEdit) {
-    const element = createPostIt(postIt, postItCount, canEdit);
+  async function appendPostIt(postIt, canEdit, folderId) {
+    const element = await createPostIt(postIt, postItCount, canEdit, folderId);
     insertPostIt(element);
     postItCount += 1;
     updateEmptyState();
@@ -383,7 +548,9 @@
 
       const notes = Array.isArray(data.postIts) ? data.postIts : [];
       const canEdit = Boolean(data.canEdit);
-      notes.forEach((note) => appendPostIt(note, canEdit));
+      for (const note of notes) {
+        await appendPostIt(note, canEdit, folderId);
+      }
       updateEmptyState();
     } catch (error) {
       setStatus(composeStatus, "Unable to load notes.", "error");
@@ -542,6 +709,9 @@
       }
 
       folders = folders.filter((item) => item.id !== folder.id);
+      if (window.LeZwuenCrypto) {
+        window.LeZwuenCrypto.clearFolderKey(folder.id);
+      }
       renderFolders();
       setStatus(folderStatus, "Deleted.", "success");
 
@@ -575,6 +745,12 @@
       return;
     }
 
+    await initCrypto();
+    if (!cryptoReady) {
+      setComposeEnabled(false);
+      setStatus(composeStatus, "Re-login to unlock encrypted notes.", "error");
+    }
+
     try {
       const response = await fetch(apiUrl("/api/folders"), {
         headers: { Authorization: `Bearer ${token}` }
@@ -588,6 +764,12 @@
 
       folders = Array.isArray(data.folders) ? data.folders : [];
       sharedFolders = Array.isArray(data.sharedFolders) ? data.sharedFolders : [];
+      if (cryptoReady) {
+        await Promise.all([
+          ...folders.map((folder) => ensureFolderKey(folder, false)),
+          ...sharedFolders.map((folder) => ensureFolderKey(folder, true))
+        ]);
+      }
       renderFolders();
 
       let initialFolder = null;
@@ -659,6 +841,9 @@
         }
 
         folders = [...folders, data.folder];
+        if (cryptoReady) {
+          await ensureFolderKey(data.folder, false);
+        }
         renderFolders();
         if (folderInput) {
           folderInput.value = "";
@@ -700,16 +885,33 @@
         return;
       }
 
+      if (!cryptoReady) {
+        setStatus(composeStatus, "Re-login to unlock encryption.", "error");
+        return;
+      }
+
       setStatus(composeStatus, "Saving...");
 
       try {
+        const folderKey = await getFolderAesKey(selectedFolderId);
+        if (!folderKey) {
+          setStatus(composeStatus, "Unable to unlock note.", "error");
+          return;
+        }
+        const encrypted = await window.LeZwuenCrypto.encryptText(body, folderKey);
         const response = await fetch(apiUrl("/api/post-its"), {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`
           },
-          body: JSON.stringify({ body, folderId: selectedFolderId })
+          body: JSON.stringify({
+            body: "",
+            bodyCiphertext: encrypted.ciphertext,
+            bodyIv: encrypted.iv,
+            bodyVersion: 1,
+            folderId: selectedFolderId
+          })
         });
         const data = await response.json().catch(() => ({}));
 
@@ -719,7 +921,7 @@
         }
 
         if (data.postIt) {
-          appendPostIt(data.postIt, true);
+          await appendPostIt(data.postIt, true, selectedFolderId);
         }
 
         if (input) {
@@ -732,5 +934,6 @@
     });
   }
 
+  loadCurrentUser();
   loadFolders();
 })();

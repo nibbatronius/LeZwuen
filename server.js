@@ -50,6 +50,11 @@ async function initDb() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name TEXT;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_adult BOOLEAN DEFAULT FALSE;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS account_type TEXT DEFAULT 'guest';`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS public_key TEXT;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS encrypted_private_key TEXT;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS key_salt TEXT;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS key_iv TEXT;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS key_iterations INTEGER;`);
   await pool.query(`UPDATE users SET account_type = 'guest' WHERE account_type IS NULL;`);
   await pool.query(`
     UPDATE users
@@ -88,6 +93,9 @@ async function initDb() {
   await pool.query(
     "ALTER TABLE post_its ADD COLUMN IF NOT EXISTS folder_id INTEGER REFERENCES folders(id) ON DELETE CASCADE;"
   );
+  await pool.query("ALTER TABLE post_its ADD COLUMN IF NOT EXISTS body_ciphertext TEXT;");
+  await pool.query("ALTER TABLE post_its ADD COLUMN IF NOT EXISTS body_iv TEXT;");
+  await pool.query("ALTER TABLE post_its ADD COLUMN IF NOT EXISTS body_version INTEGER DEFAULT 1;");
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS friend_requests (
@@ -110,6 +118,9 @@ async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
+  await pool.query("ALTER TABLE messages ADD COLUMN IF NOT EXISTS body_ciphertext TEXT;");
+  await pool.query("ALTER TABLE messages ADD COLUMN IF NOT EXISTS body_iv TEXT;");
+  await pool.query("ALTER TABLE messages ADD COLUMN IF NOT EXISTS body_version INTEGER DEFAULT 1;");
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS folder_shares (
@@ -119,6 +130,18 @@ async function initDb() {
       shared_with_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       UNIQUE (folder_id, shared_with_user_id)
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS folder_keys (
+      id SERIAL PRIMARY KEY,
+      folder_id INTEGER NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      enc_key TEXT NOT NULL,
+      enc_iv TEXT NOT NULL,
+      key_version INTEGER NOT NULL DEFAULT 1,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (folder_id, user_id)
     );
   `);
 
@@ -244,7 +267,12 @@ async function getUserFromToken(token) {
              users.display_name,
              users.profile_image_url,
              users.is_adult,
-             users.account_type
+             users.account_type,
+             users.public_key,
+             users.encrypted_private_key,
+             users.key_salt,
+             users.key_iv,
+             users.key_iterations
       FROM sessions
       JOIN users ON users.id = sessions.user_id
       WHERE sessions.token = $1
@@ -400,6 +428,13 @@ app.post("/api/signup", async (req, res) => {
   const email = (req.body.email || "").trim().toLowerCase();
   const password = req.body.password || "";
   const displayName = (req.body.displayName || "").trim();
+  const publicKey = typeof req.body.publicKey === "string" ? req.body.publicKey.trim() : null;
+  const encryptedPrivateKey =
+    typeof req.body.encryptedPrivateKey === "string" ? req.body.encryptedPrivateKey.trim() : null;
+  const keySalt = typeof req.body.keySalt === "string" ? req.body.keySalt.trim() : null;
+  const keyIv = typeof req.body.keyIv === "string" ? req.body.keyIv.trim() : null;
+  const keyIterationsInput = Number.parseInt(req.body.keyIterations, 10);
+  const keyIterations = Number.isInteger(keyIterationsInput) ? keyIterationsInput : null;
 
   if (!email || !email.includes("@")) {
     return res.status(400).json({ error: "Please enter a valid email." });
@@ -417,11 +452,37 @@ app.post("/api/signup", async (req, res) => {
     const passwordHash = await bcrypt.hash(password, 10);
     const result = await pool.query(
       `
-        INSERT INTO users (email, password_hash, display_name)
-        VALUES ($1, $2, $3)
-        RETURNING id, email, display_name, account_type
+        INSERT INTO users (
+          email,
+          password_hash,
+          display_name,
+          public_key,
+          encrypted_private_key,
+          key_salt,
+          key_iv,
+          key_iterations
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        RETURNING id,
+                  email,
+                  display_name,
+                  account_type,
+                  public_key,
+                  encrypted_private_key,
+                  key_salt,
+                  key_iv,
+                  key_iterations
       `,
-      [email, passwordHash, displayName]
+      [
+        email,
+        passwordHash,
+        displayName,
+        publicKey,
+        encryptedPrivateKey,
+        keySalt,
+        keyIv,
+        keyIterations
+      ]
     );
 
     await ensureDefaultFolderForUser(result.rows[0].id);
@@ -453,7 +514,18 @@ app.post("/api/login", async (req, res) => {
 
   try {
     const result = await pool.query(
-      "SELECT id, email, display_name, password_hash, account_type FROM users WHERE email = $1",
+      `SELECT id,
+              email,
+              display_name,
+              password_hash,
+              account_type,
+              public_key,
+              encrypted_private_key,
+              key_salt,
+              key_iv,
+              key_iterations
+       FROM users
+       WHERE email = $1`,
       [email]
     );
 
@@ -476,7 +548,12 @@ app.post("/api/login", async (req, res) => {
         id: user.id,
         email: user.email,
         display_name: user.display_name,
-        account_type: user.account_type
+        account_type: user.account_type,
+        public_key: user.public_key,
+        encrypted_private_key: user.encrypted_private_key,
+        key_salt: user.key_salt,
+        key_iv: user.key_iv,
+        key_iterations: user.key_iterations
       },
       token,
       redirect: "/home.html"
@@ -529,6 +606,57 @@ app.get("/api/me", async (req, res) => {
   } catch (error) {
     console.error("Profile lookup failed:", error);
     return res.status(500).json({ error: "Unable to load profile." });
+  }
+});
+
+app.post("/api/e2ee/bootstrap", async (req, res) => {
+  const token = getTokenFromRequest(req);
+  const publicKey = typeof req.body.publicKey === "string" ? req.body.publicKey.trim() : "";
+  const encryptedPrivateKey =
+    typeof req.body.encryptedPrivateKey === "string" ? req.body.encryptedPrivateKey.trim() : "";
+  const keySalt = typeof req.body.keySalt === "string" ? req.body.keySalt.trim() : "";
+  const keyIv = typeof req.body.keyIv === "string" ? req.body.keyIv.trim() : "";
+  const keyIterationsInput = Number.parseInt(req.body.keyIterations, 10);
+  const keyIterations = Number.isInteger(keyIterationsInput) ? keyIterationsInput : null;
+
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+
+  if (!publicKey || !encryptedPrivateKey || !keySalt || !keyIv || !keyIterations) {
+    return res.status(400).json({ error: "Missing encryption keys." });
+  }
+
+  try {
+    const user = await getUserFromToken(token);
+
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized." });
+    }
+
+    const result = await pool.query(
+      `
+        UPDATE users
+        SET public_key = $1,
+            encrypted_private_key = $2,
+            key_salt = $3,
+            key_iv = $4,
+            key_iterations = $5
+        WHERE id = $6
+        RETURNING id,
+                  public_key,
+                  encrypted_private_key,
+                  key_salt,
+                  key_iv,
+                  key_iterations
+      `,
+      [publicKey, encryptedPrivateKey, keySalt, keyIv, keyIterations, user.id]
+    );
+
+    return res.json({ ok: true, keys: result.rows[0] });
+  } catch (error) {
+    console.error("E2EE bootstrap failed:", error);
+    return res.status(500).json({ error: "Unable to save encryption keys." });
   }
 });
 
@@ -616,7 +744,21 @@ app.get("/api/folders", async (req, res) => {
     }
 
     const ownFolders = await pool.query(
-      "SELECT id, name, created_at, updated_at FROM folders WHERE user_id = $1 ORDER BY created_at ASC, id ASC",
+      `
+        SELECT folders.id,
+               folders.name,
+               folders.created_at,
+               folders.updated_at,
+               folder_keys.enc_key AS encrypted_key,
+               folder_keys.enc_iv AS key_iv,
+               folder_keys.key_version
+        FROM folders
+        LEFT JOIN folder_keys
+          ON folder_keys.folder_id = folders.id
+         AND folder_keys.user_id = $1
+        WHERE folders.user_id = $1
+        ORDER BY folders.created_at ASC, folders.id ASC
+      `,
       [user.id]
     );
 
@@ -625,10 +767,17 @@ app.get("/api/folders", async (req, res) => {
         SELECT folders.id,
                folders.name,
                folders.user_id AS owner_id,
-               users.display_name AS owner_display_name
+               users.display_name AS owner_display_name,
+               users.public_key AS owner_public_key,
+               folder_keys.enc_key AS encrypted_key,
+               folder_keys.enc_iv AS key_iv,
+               folder_keys.key_version
         FROM folder_shares
         JOIN folders ON folders.id = folder_shares.folder_id
         JOIN users ON users.id = folders.user_id
+        LEFT JOIN folder_keys
+          ON folder_keys.folder_id = folders.id
+         AND folder_keys.user_id = $1
         WHERE folder_shares.shared_with_user_id = $1
         ORDER BY folder_shares.created_at ASC, folders.id ASC
       `,
@@ -734,6 +883,58 @@ app.patch("/api/folders/:id", async (req, res) => {
   }
 });
 
+app.post("/api/folders/:id/key", async (req, res) => {
+  const token = getTokenFromRequest(req);
+  const folderId = Number.parseInt(req.params.id, 10);
+  const encryptedKey = typeof req.body.encryptedKey === "string" ? req.body.encryptedKey.trim() : "";
+  const keyIv = typeof req.body.keyIv === "string" ? req.body.keyIv.trim() : "";
+  const keyVersionInput = Number.parseInt(req.body.keyVersion, 10);
+  const keyVersion = Number.isInteger(keyVersionInput) ? keyVersionInput : 1;
+
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+
+  if (!Number.isInteger(folderId)) {
+    return res.status(400).json({ error: "Invalid folder id." });
+  }
+
+  if (!encryptedKey || !keyIv) {
+    return res.status(400).json({ error: "Encrypted key is required." });
+  }
+
+  try {
+    const user = await getUserFromToken(token);
+
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized." });
+    }
+
+    const access = await getFolderAccess(user.id, folderId);
+    if (!access || !access.canEdit) {
+      return res.status(404).json({ error: "Folder not found." });
+    }
+
+    const result = await pool.query(
+      `
+        INSERT INTO folder_keys (folder_id, user_id, enc_key, enc_iv, key_version)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (folder_id, user_id)
+        DO UPDATE SET enc_key = EXCLUDED.enc_key,
+                      enc_iv = EXCLUDED.enc_iv,
+                      key_version = EXCLUDED.key_version
+        RETURNING folder_id, user_id, enc_key, enc_iv, key_version
+      `,
+      [folderId, user.id, encryptedKey, keyIv, keyVersion]
+    );
+
+    return res.json({ ok: true, key: result.rows[0] });
+  } catch (error) {
+    console.error("Folder key save failed:", error);
+    return res.status(500).json({ error: "Unable to save folder key." });
+  }
+});
+
 app.delete("/api/folders/:id", async (req, res) => {
   const token = getTokenFromRequest(req);
   const folderId = Number.parseInt(req.params.id, 10);
@@ -795,7 +996,13 @@ app.get("/api/folders/:id/post-its", async (req, res) => {
 
     const result = await pool.query(
       `
-        SELECT id, body, created_at, updated_at
+        SELECT id,
+               body,
+               body_ciphertext,
+               body_iv,
+               body_version,
+               created_at,
+               updated_at
         FROM post_its
         WHERE folder_id = $1
         ORDER BY created_at ASC, id ASC
@@ -841,7 +1048,13 @@ app.get("/api/post-its", async (req, res) => {
 
     const result = await pool.query(
       `
-        SELECT id, body, created_at, updated_at
+        SELECT id,
+               body,
+               body_ciphertext,
+               body_iv,
+               body_version,
+               created_at,
+               updated_at
         FROM post_its
         WHERE folder_id = $1
         ORDER BY created_at ASC, id ASC
@@ -863,7 +1076,13 @@ app.get("/api/post-its", async (req, res) => {
 
 app.post("/api/post-its", async (req, res) => {
   const token = getTokenFromRequest(req);
-  const bodyInput = typeof req.body.body === "string" ? req.body.body.trim() : "";
+  const bodyCiphertext =
+    typeof req.body.bodyCiphertext === "string" ? req.body.bodyCiphertext.trim() : "";
+  const bodyIv = typeof req.body.bodyIv === "string" ? req.body.bodyIv.trim() : "";
+  const bodyVersionInput = Number.parseInt(req.body.bodyVersion, 10);
+  const bodyVersion = Number.isInteger(bodyVersionInput) ? bodyVersionInput : 1;
+  const isEncrypted = Boolean(bodyCiphertext && bodyIv);
+  const bodyInput = !isEncrypted && typeof req.body.body === "string" ? req.body.body.trim() : "";
   const folderId = Number.parseInt(req.body.folderId, 10);
 
   if (!token) {
@@ -874,11 +1093,17 @@ app.post("/api/post-its", async (req, res) => {
     return res.status(400).json({ error: "Folder id is required." });
   }
 
-  if (!bodyInput) {
+  if (!isEncrypted && !bodyInput) {
     return res.status(400).json({ error: "Note cannot be empty." });
   }
 
-  if (bodyInput.length > 4000) {
+  if (!isEncrypted && bodyInput.length > 4000) {
+    return res.status(400).json({ error: "Note is too long." });
+  }
+  if (isEncrypted && bodyCiphertext.length > 16000) {
+    return res.status(400).json({ error: "Note is too long." });
+  }
+  if (isEncrypted && bodyIv.length > 128) {
     return res.status(400).json({ error: "Note is too long." });
   }
 
@@ -896,11 +1121,17 @@ app.post("/api/post-its", async (req, res) => {
 
     const result = await pool.query(
       `
-        INSERT INTO post_its (user_id, folder_id, body)
-        VALUES ($1, $2, $3)
-        RETURNING id, body, created_at, updated_at
+        INSERT INTO post_its (user_id, folder_id, body, body_ciphertext, body_iv, body_version)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id,
+                  body,
+                  body_ciphertext,
+                  body_iv,
+                  body_version,
+                  created_at,
+                  updated_at
       `,
-      [user.id, folderId, bodyInput]
+      [user.id, folderId, bodyInput || "", bodyCiphertext || null, bodyIv || null, bodyVersion]
     );
 
     return res.status(201).json({ ok: true, postIt: result.rows[0] });
@@ -913,7 +1144,13 @@ app.post("/api/post-its", async (req, res) => {
 app.patch("/api/post-its/:id", async (req, res) => {
   const token = getTokenFromRequest(req);
   const postItId = Number.parseInt(req.params.id, 10);
-  const bodyInput = typeof req.body.body === "string" ? req.body.body.trim() : "";
+  const bodyCiphertext =
+    typeof req.body.bodyCiphertext === "string" ? req.body.bodyCiphertext.trim() : "";
+  const bodyIv = typeof req.body.bodyIv === "string" ? req.body.bodyIv.trim() : "";
+  const bodyVersionInput = Number.parseInt(req.body.bodyVersion, 10);
+  const bodyVersion = Number.isInteger(bodyVersionInput) ? bodyVersionInput : 1;
+  const isEncrypted = Boolean(bodyCiphertext && bodyIv);
+  const bodyInput = !isEncrypted && typeof req.body.body === "string" ? req.body.body.trim() : "";
 
   if (!token) {
     return res.status(401).json({ error: "Unauthorized." });
@@ -923,11 +1160,17 @@ app.patch("/api/post-its/:id", async (req, res) => {
     return res.status(400).json({ error: "Invalid note id." });
   }
 
-  if (!bodyInput) {
+  if (!isEncrypted && !bodyInput) {
     return res.status(400).json({ error: "Note cannot be empty." });
   }
 
-  if (bodyInput.length > 4000) {
+  if (!isEncrypted && bodyInput.length > 4000) {
+    return res.status(400).json({ error: "Note is too long." });
+  }
+  if (isEncrypted && bodyCiphertext.length > 16000) {
+    return res.status(400).json({ error: "Note is too long." });
+  }
+  if (isEncrypted && bodyIv.length > 128) {
     return res.status(400).json({ error: "Note is too long." });
   }
 
@@ -941,11 +1184,21 @@ app.patch("/api/post-its/:id", async (req, res) => {
     const result = await pool.query(
       `
         UPDATE post_its
-        SET body = $1, updated_at = NOW()
-        WHERE id = $2 AND user_id = $3
-        RETURNING id, body, created_at, updated_at
+        SET body = $1,
+            body_ciphertext = $2,
+            body_iv = $3,
+            body_version = $4,
+            updated_at = NOW()
+        WHERE id = $5 AND user_id = $6
+        RETURNING id,
+                  body,
+                  body_ciphertext,
+                  body_iv,
+                  body_version,
+                  created_at,
+                  updated_at
       `,
-      [bodyInput, postItId, user.id]
+      [bodyInput || "", bodyCiphertext || null, bodyIv || null, bodyVersion, postItId, user.id]
     );
 
     if (!result.rows.length) {
@@ -1246,7 +1499,8 @@ app.get("/api/friends", async (req, res) => {
           users.id,
           users.display_name,
           users.email,
-          users.profile_image_url
+          users.profile_image_url,
+          users.public_key
         FROM friend_requests
         JOIN users ON users.id =
           CASE
@@ -1295,6 +1549,9 @@ app.get("/api/messages/:userId", async (req, res) => {
       `
         SELECT messages.id,
                messages.body,
+               messages.body_ciphertext,
+               messages.body_iv,
+               messages.body_version,
                messages.sender_id,
                messages.recipient_id,
                messages.share_folder_id,
@@ -1319,9 +1576,23 @@ app.get("/api/messages/:userId", async (req, res) => {
 
 app.post("/api/messages", async (req, res) => {
   const token = getTokenFromRequest(req);
-  const bodyInput = typeof req.body.body === "string" ? req.body.body.trim() : "";
+  const bodyCiphertext =
+    typeof req.body.bodyCiphertext === "string" ? req.body.bodyCiphertext.trim() : "";
+  const bodyIv = typeof req.body.bodyIv === "string" ? req.body.bodyIv.trim() : "";
+  const bodyVersionInput = Number.parseInt(req.body.bodyVersion, 10);
+  const bodyVersion = Number.isInteger(bodyVersionInput) ? bodyVersionInput : 1;
+  const isEncrypted = Boolean(bodyCiphertext && bodyIv);
+  const bodyInput = !isEncrypted && typeof req.body.body === "string" ? req.body.body.trim() : "";
   const recipientId = Number.parseInt(req.body.recipientId, 10);
   const shareFolderId = Number.parseInt(req.body.shareFolderId, 10);
+  const shareFolderKey =
+    typeof req.body.shareFolderKey === "string" ? req.body.shareFolderKey.trim() : "";
+  const shareFolderKeyIv =
+    typeof req.body.shareFolderKeyIv === "string" ? req.body.shareFolderKeyIv.trim() : "";
+  const shareFolderKeyVersionInput = Number.parseInt(req.body.shareFolderKeyVersion, 10);
+  const shareFolderKeyVersion = Number.isInteger(shareFolderKeyVersionInput)
+    ? shareFolderKeyVersionInput
+    : 1;
 
   if (!token) {
     return res.status(401).json({ error: "Unauthorized." });
@@ -1331,11 +1602,19 @@ app.post("/api/messages", async (req, res) => {
     return res.status(400).json({ error: "Recipient is required." });
   }
 
-  if (!bodyInput && !Number.isInteger(shareFolderId)) {
+  if (!bodyInput && !isEncrypted && !Number.isInteger(shareFolderId)) {
     return res.status(400).json({ error: "Message cannot be empty." });
   }
 
-  if (bodyInput.length > 4000) {
+  if (!isEncrypted && bodyInput.length > 4000) {
+    return res.status(400).json({ error: "Message is too long." });
+  }
+
+  if (isEncrypted && bodyCiphertext.length > 16000) {
+    return res.status(400).json({ error: "Message is too long." });
+  }
+
+  if (isEncrypted && bodyIv.length > 128) {
     return res.status(400).json({ error: "Message is too long." });
   }
 
@@ -1374,15 +1653,53 @@ app.post("/api/messages", async (req, res) => {
         `,
         [shareFolderId, user.id, recipientId]
       );
+
+      if (shareFolderKey && shareFolderKeyIv) {
+        await pool.query(
+          `
+            INSERT INTO folder_keys (folder_id, user_id, enc_key, enc_iv, key_version)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (folder_id, user_id)
+            DO UPDATE SET enc_key = EXCLUDED.enc_key,
+                          enc_iv = EXCLUDED.enc_iv,
+                          key_version = EXCLUDED.key_version
+          `,
+          [shareFolderId, recipientId, shareFolderKey, shareFolderKeyIv, shareFolderKeyVersion]
+        );
+      }
     }
 
     const result = await pool.query(
       `
-        INSERT INTO messages (sender_id, recipient_id, body, share_folder_id)
-        VALUES ($1, $2, $3, $4)
-        RETURNING id, body, sender_id, recipient_id, share_folder_id, created_at
+        INSERT INTO messages (
+          sender_id,
+          recipient_id,
+          body,
+          body_ciphertext,
+          body_iv,
+          body_version,
+          share_folder_id
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING id,
+                  body,
+                  body_ciphertext,
+                  body_iv,
+                  body_version,
+                  sender_id,
+                  recipient_id,
+                  share_folder_id,
+                  created_at
       `,
-      [user.id, recipientId, bodyInput || "", shareFolderValue]
+      [
+        user.id,
+        recipientId,
+        bodyInput || "",
+        bodyCiphertext || null,
+        bodyIv || null,
+        bodyVersion,
+        shareFolderValue
+      ]
     );
 
     return res.status(201).json({

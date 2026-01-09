@@ -63,6 +63,7 @@ async function submitAuth(form, endpoint) {
   const message = form.querySelector(".form-message");
   const button = form.querySelector("button[type='submit']");
   const originalLabel = button.textContent;
+  let cryptoBundle = null;
 
   message.textContent = "";
   message.removeAttribute("data-type");
@@ -76,13 +77,27 @@ async function submitAuth(form, endpoint) {
         message.setAttribute("data-type", "error");
         return;
       }
+      if (window.LeZwuenCrypto) {
+        cryptoBundle = await window.LeZwuenCrypto.generateUserKeys(password);
+      }
     }
 
     const response = await fetch(apiUrl(endpoint), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(
-        endpoint === "/api/signup" ? { email, password, displayName } : { email, password }
+        endpoint === "/api/signup"
+          ? {
+              email,
+              password,
+              displayName,
+              publicKey: cryptoBundle ? cryptoBundle.publicKey : undefined,
+              encryptedPrivateKey: cryptoBundle ? cryptoBundle.encryptedPrivateKey : undefined,
+              keySalt: cryptoBundle ? cryptoBundle.keySalt : undefined,
+              keyIv: cryptoBundle ? cryptoBundle.keyIv : undefined,
+              keyIterations: cryptoBundle ? cryptoBundle.keyIterations : undefined
+            }
+          : { email, password }
       )
     });
 
@@ -92,6 +107,52 @@ async function submitAuth(form, endpoint) {
       message.textContent = data.error || "Something went wrong.";
       message.setAttribute("data-type", "error");
       return;
+    }
+
+    if (endpoint === "/api/signup" && cryptoBundle && window.LeZwuenCrypto) {
+      window.LeZwuenCrypto.storeSessionKeys(cryptoBundle.publicKey, cryptoBundle.privateKey);
+    }
+
+    if (endpoint === "/api/login" && window.LeZwuenCrypto && data.user) {
+      const hasKeys =
+        data.user.public_key &&
+        data.user.encrypted_private_key &&
+        data.user.key_salt &&
+        data.user.key_iv;
+      if (hasKeys) {
+        await window.LeZwuenCrypto.unlockUserKeys(
+          {
+            publicKey: data.user.public_key,
+            encryptedPrivateKey: data.user.encrypted_private_key,
+            keySalt: data.user.key_salt,
+            keyIv: data.user.key_iv,
+            keyIterations: data.user.key_iterations
+          },
+          password
+        );
+      } else if (data.token) {
+        const freshKeys = await window.LeZwuenCrypto.generateUserKeys(password);
+        await fetch(apiUrl("/api/e2ee/bootstrap"), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${data.token}`
+          },
+          body: JSON.stringify({
+            publicKey: freshKeys.publicKey,
+            encryptedPrivateKey: freshKeys.encryptedPrivateKey,
+            keySalt: freshKeys.keySalt,
+            keyIv: freshKeys.keyIv,
+            keyIterations: freshKeys.keyIterations
+          })
+        });
+        window.LeZwuenCrypto.storeSessionKeys(freshKeys.publicKey, freshKeys.privateKey);
+        data.user.public_key = freshKeys.publicKey;
+        data.user.encrypted_private_key = freshKeys.encryptedPrivateKey;
+        data.user.key_salt = freshKeys.keySalt;
+        data.user.key_iv = freshKeys.keyIv;
+        data.user.key_iterations = freshKeys.keyIterations;
+      }
     }
 
     if (data.user) {
@@ -110,7 +171,13 @@ async function submitAuth(form, endpoint) {
     message.setAttribute("data-type", "success");
     window.location.href = data.redirect || "/home.html";
   } catch (error) {
-    message.textContent = "Network error. Please try again.";
+    if (endpoint === "/api/login" && window.LeZwuenCrypto) {
+      message.textContent = "Unable to unlock encrypted data. Please try again.";
+    } else if (endpoint === "/api/signup" && window.LeZwuenCrypto) {
+      message.textContent = "Unable to set up encryption. Please try again.";
+    } else {
+      message.textContent = "Network error. Please try again.";
+    }
     message.setAttribute("data-type", "error");
   } finally {
     button.disabled = false;

@@ -17,6 +17,10 @@
   let friends = [];
   let selectedFriend = null;
   let currentUserId = null;
+  let cryptoReady = false;
+  let privateKey = null;
+  let publicKey = null;
+  const friendKeys = new Map();
 
   function apiUrl(path) {
     if (!apiBaseUrl) {
@@ -27,6 +31,104 @@
 
   function getAuthToken() {
     return localStorage.getItem("lezwuenAuthToken");
+  }
+
+  function conversationInfo(userId, otherUserId) {
+    const low = Math.min(userId, otherUserId);
+    const high = Math.max(userId, otherUserId);
+    return `msg:${low}:${high}`;
+  }
+
+  function folderKeyInfo(folderId, ownerId, recipientId) {
+    return `folder:${folderId}:${ownerId}:${recipientId}`;
+  }
+
+  async function initCrypto() {
+    if (!window.LeZwuenCrypto) {
+      cryptoReady = false;
+      return false;
+    }
+
+    privateKey = await window.LeZwuenCrypto.getPrivateKey();
+    publicKey = await window.LeZwuenCrypto.getPublicKey();
+    cryptoReady = Boolean(privateKey && publicKey);
+    return cryptoReady;
+  }
+
+  async function getConversationKey(otherUserId, otherPublicKey) {
+    const otherKeyObj = await window.LeZwuenCrypto.importPublicKey(otherPublicKey);
+    return window.LeZwuenCrypto.deriveSharedKey(
+      privateKey,
+      otherKeyObj,
+      conversationInfo(currentUserId, otherUserId)
+    );
+  }
+
+  async function ensureFolderKey(folder) {
+    if (!cryptoReady || !window.LeZwuenCrypto || !currentUserId) {
+      return false;
+    }
+
+    const existingKey = window.LeZwuenCrypto.getFolderKey(folder.id);
+    if (existingKey) {
+      return true;
+    }
+
+    const ownerPublicKey = window.LeZwuenCrypto.getStoredPublicKey();
+    if (!ownerPublicKey) {
+      return false;
+    }
+
+    const ownerPublicKeyObj = await window.LeZwuenCrypto.importPublicKey(ownerPublicKey);
+    const sharedKey = await window.LeZwuenCrypto.deriveSharedKey(
+      privateKey,
+      ownerPublicKeyObj,
+      folderKeyInfo(folder.id, currentUserId, currentUserId)
+    );
+
+    if (folder.encrypted_key && folder.key_iv) {
+      try {
+        const rawKey = await window.LeZwuenCrypto.decryptRaw(
+          folder.encrypted_key,
+          folder.key_iv,
+          sharedKey
+        );
+        const rawKeyBase64 = window.LeZwuenCrypto.arrayBufferToBase64(rawKey);
+        window.LeZwuenCrypto.storeFolderKey(folder.id, rawKeyBase64);
+        return true;
+      } catch (error) {
+        return false;
+      }
+    }
+
+    const rawKeyBase64 = await window.LeZwuenCrypto.generateFolderKey();
+    const encrypted = await window.LeZwuenCrypto.encryptRaw(
+      window.LeZwuenCrypto.base64ToArrayBuffer(rawKeyBase64),
+      sharedKey
+    );
+    const token = getAuthToken();
+    if (!token) {
+      return false;
+    }
+
+    try {
+      await fetch(apiUrl(`/api/folders/${folder.id}/key`), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          encryptedKey: encrypted.ciphertext,
+          keyIv: encrypted.iv,
+          keyVersion: 1
+        })
+      });
+      window.LeZwuenCrypto.storeFolderKey(folder.id, rawKeyBase64);
+      return true;
+    } catch (error) {
+      return false;
+    }
   }
 
   function setStatus(element, message, type) {
@@ -160,7 +262,35 @@
     });
   }
 
-  function renderMessages(messages) {
+  async function resolveMessageBody(message) {
+    if (message.body_ciphertext && message.body_iv) {
+      if (!cryptoReady || !window.LeZwuenCrypto || !currentUserId) {
+        return "[Encrypted message]";
+      }
+
+      const otherUserId =
+        message.sender_id === currentUserId ? message.recipient_id : message.sender_id;
+      const otherPublicKey = friendKeys.get(otherUserId);
+      if (!otherPublicKey) {
+        return "[Encrypted message]";
+      }
+
+      try {
+        const sharedKey = await getConversationKey(otherUserId, otherPublicKey);
+        return await window.LeZwuenCrypto.decryptText(
+          message.body_ciphertext,
+          message.body_iv,
+          sharedKey
+        );
+      } catch (error) {
+        return "[Encrypted message]";
+      }
+    }
+
+    return message.body || "";
+  }
+
+  async function renderMessages(messages) {
     if (!messagesList) {
       return;
     }
@@ -174,17 +304,18 @@
       return;
     }
 
-    messages.forEach((message) => {
+    for (const message of messages) {
       const bubble = document.createElement("div");
       bubble.className = "message-bubble";
       if (currentUserId && message.sender_id === currentUserId) {
         bubble.classList.add("outgoing");
       }
 
-      if (message.body) {
+      const bodyText = await resolveMessageBody(message);
+      if (bodyText) {
         const text = document.createElement("p");
         text.className = "message-text";
-        text.textContent = message.body;
+        text.textContent = bodyText;
         bubble.appendChild(text);
       }
 
@@ -210,7 +341,7 @@
       }
 
       messagesList.appendChild(bubble);
-    });
+    }
   }
 
   function setConversationHeader(friend) {
@@ -265,13 +396,19 @@
       }
 
       friends = Array.isArray(data.friends) ? data.friends : [];
+      friendKeys.clear();
+      friends.forEach((friend) => {
+        if (friend.public_key) {
+          friendKeys.set(friend.id, friend.public_key);
+        }
+      });
       renderFriends();
       if (selectedFriend) {
         const stillThere = friends.find((friend) => friend.id === selectedFriend.id);
         if (!stillThere) {
           selectedFriend = null;
           setConversationHeader(null);
-          renderMessages([]);
+          await renderMessages([]);
           setMessagingEnabled(false);
         }
       }
@@ -286,6 +423,8 @@
       return;
     }
 
+    await initCrypto();
+
     try {
       const response = await fetch(apiUrl("/api/folders"), {
         headers: { Authorization: `Bearer ${token}` }
@@ -297,6 +436,9 @@
       }
 
       const own = Array.isArray(data.folders) ? data.folders : [];
+      if (cryptoReady) {
+        await Promise.all(own.map((folder) => ensureFolderKey(folder)));
+      }
       shareSelect.textContent = "";
       const placeholder = document.createElement("option");
       placeholder.value = "";
@@ -337,6 +479,10 @@
       return;
     }
 
+    if (!cryptoReady) {
+      await initCrypto();
+    }
+
     try {
       const response = await fetch(apiUrl(`/api/messages/${selectedFriend.id}`), {
         headers: { Authorization: `Bearer ${token}` }
@@ -348,7 +494,7 @@
         return;
       }
 
-      renderMessages(Array.isArray(data.messages) ? data.messages : []);
+      await renderMessages(Array.isArray(data.messages) ? data.messages : []);
     } catch (error) {
       setStatus(messageStatus, "Unable to load messages.", "error");
     }
@@ -450,20 +596,64 @@
         return;
       }
 
+      if (!cryptoReady || !currentUserId) {
+        setStatus(messageStatus, "Re-login to unlock encryption.", "error");
+        return;
+      }
+
       setStatus(messageStatus, "Sending...");
 
       try {
+        const payload = {
+          recipientId: selectedFriend.id,
+          shareFolderId: shareFolderId || undefined
+        };
+        const recipientPublicKey = friendKeys.get(selectedFriend.id);
+
+        if (body) {
+          if (!recipientPublicKey) {
+            setStatus(messageStatus, "Recipient encryption key missing.", "error");
+            return;
+          }
+          const sharedKey = await getConversationKey(selectedFriend.id, recipientPublicKey);
+          const encrypted = await window.LeZwuenCrypto.encryptText(body, sharedKey);
+          payload.body = "";
+          payload.bodyCiphertext = encrypted.ciphertext;
+          payload.bodyIv = encrypted.iv;
+          payload.bodyVersion = 1;
+        }
+
+        if (shareFolderId) {
+          if (!recipientPublicKey) {
+            setStatus(messageStatus, "Recipient encryption key missing.", "error");
+            return;
+          }
+          const folderKeyBase64 = window.LeZwuenCrypto.getFolderKey(shareFolderId);
+          if (!folderKeyBase64) {
+            setStatus(messageStatus, "Open the folder once before sharing it.", "error");
+            return;
+          }
+          const shareKey = await window.LeZwuenCrypto.deriveSharedKey(
+            privateKey,
+            await window.LeZwuenCrypto.importPublicKey(recipientPublicKey),
+            folderKeyInfo(shareFolderId, currentUserId, selectedFriend.id)
+          );
+          const encryptedFolderKey = await window.LeZwuenCrypto.encryptRaw(
+            window.LeZwuenCrypto.base64ToArrayBuffer(folderKeyBase64),
+            shareKey
+          );
+          payload.shareFolderKey = encryptedFolderKey.ciphertext;
+          payload.shareFolderKeyIv = encryptedFolderKey.iv;
+          payload.shareFolderKeyVersion = 1;
+        }
+
         const response = await fetch(apiUrl("/api/messages"), {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`
           },
-          body: JSON.stringify({
-            recipientId: selectedFriend.id,
-            body,
-            shareFolderId: shareFolderId || undefined
-          })
+          body: JSON.stringify(payload)
         });
         const data = await response.json().catch(() => ({}));
 
@@ -487,6 +677,7 @@
   }
 
   loadCurrentUser();
+  initCrypto();
   setMessagingEnabled(false);
   loadFriendRequests();
   loadFriends();
