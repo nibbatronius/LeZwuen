@@ -25,4 +25,18 @@
       window.LeZwuenWindow.close();
     });
   }
+
+  const closeApp = controls.querySelector("[data-close-app]");
+  if (closeApp) {
+    closeApp.addEventListener("click", () => {
+      window.LeZwuenWindow.close();
+    });
+  }
+
+  const globalCloseButtons = document.querySelectorAll("[data-close-app]");
+  globalCloseButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      window.LeZwuenWindow.close();
+    });
+  });
 })();
