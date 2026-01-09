@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+    />
+    <title>LeZwuen | Sales Tracker</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="app-body">
+    <header class="site-header">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-text">LeZwuen</span>
+      </div>
+      <nav class="site-nav">
+        <a class="nav-link" href="home.html">Home</a>
+        <a class="nav-link" href="messages.html">Messages</a>
+        <details class="nav-dropdown">
+          <summary class="nav-link active">Services</summary>
+          <div class="nav-dropdown-menu">
+            <a class="nav-dropdown-link" href="profit.html">Profit calculator</a>
+            <a class="nav-dropdown-link" href="expense.html">Expense tracker</a>
+            <a class="nav-dropdown-link active" href="sales.html">Sales tracker</a>
+            <a class="nav-dropdown-link" href="notes.html">Post-it notes</a>
+          </div>
+        </details>
+      </nav>
+      <div class="profile-slot">
+        <a class="avatar-link" href="profile.html" aria-label="Go to profile">
+          <img
+            class="avatar"
+            src="avatar-placeholder.svg"
+            alt="Profile avatar"
+            data-avatar-img
+          />
+        </a>
+        <label class="avatar-edit" aria-label="Upload profile photo">
+          <input class="avatar-input" type="file" accept="image/*" data-avatar-input />
+          <span aria-hidden="true">+</span>
+        </label>
+        <span class="upload-status" data-upload-status aria-live="polite"></span>
+      </div>
+    </header>
+    <main class="app-layout app-layout-sales">
+      <section class="sales-shell">
+        <section class="sales-panel">
+          <div class="sales-panel-header">
+            <div>
+              <div class="sales-title">Sales tracker</div>
+              <div class="sales-subtitle">Log sales that power your profit sync.</div>
+            </div>
+            <button class="ghost" type="button" data-sales-reset>Clear all</button>
+          </div>
+          <div class="sales-field">
+            <label class="sales-field-label" for="sales-currency">Currency</label>
+            <select class="sales-select" id="sales-currency" data-sales-currency></select>
+          </div>
+          <form class="sales-form" data-sales-form>
+            <div class="sales-field">
+              <label class="sales-field-label" for="sales-name">Sale name</label>
+              <input
+                id="sales-name"
+                class="sales-input"
+                type="text"
+                placeholder="Bundle order"
+                data-sales-name
+              />
+            </div>
+            <div class="sales-fields">
+              <div class="sales-field">
+                <label class="sales-field-label" for="sales-units">Units</label>
+                <input
+                  id="sales-units"
+                  class="sales-input"
+                  type="text"
+                  inputmode="decimal"
+                  placeholder="0"
+                  data-sales-units
+                />
+              </div>
+              <div class="sales-field">
+                <label class="sales-field-label" for="sales-unit-price">Price per unit</label>
+                <div class="sales-money-field">
+                  <span class="sales-currency-prefix" data-sales-currency-prefix>USD</span>
+                  <input
+                    id="sales-unit-price"
+                    type="text"
+                    inputmode="decimal"
+                    placeholder="0.00"
+                    data-sales-unit-price
+                  />
+                </div>
+              </div>
+            </div>
+            <div class="sales-field">
+              <label class="sales-field-label" for="sales-date">Date</label>
+              <input id="sales-date" class="sales-input" type="date" data-sales-date />
+            </div>
+            <div class="sales-total" data-sales-total>Estimated total: --</div>
+            <div class="sales-actions">
+              <button class="primary" type="submit">Add sale</button>
+            </div>
+            <div class="sales-status" data-sales-status aria-live="polite"></div>
+          </form>
+          <div class="sales-summary">
+            <div class="sales-summary-card">
+              <div class="sales-summary-label">Total sales</div>
+              <div class="sales-summary-value" data-sales-total-value>--</div>
+            </div>
+            <div class="sales-summary-card">
+              <div class="sales-summary-label">Entries</div>
+              <div class="sales-summary-value" data-sales-count>--</div>
+            </div>
+          </div>
+          <div class="sales-list" data-sales-list></div>
+        </section>
+        <section class="sales-panel">
+          <div class="sales-panel-header">
+            <div>
+              <div class="sales-title">Sales insights</div>
+              <div class="sales-subtitle">Quick stats from your logged revenue.</div>
+            </div>
+          </div>
+          <div class="sales-insights">
+            <div class="sales-insight-card">
+              <div class="sales-summary-label">Total units</div>
+              <div class="sales-summary-value" data-sales-units-total>--</div>
+            </div>
+            <div class="sales-insight-card">
+              <div class="sales-summary-label">Avg sale</div>
+              <div class="sales-summary-value" data-sales-average>--</div>
+            </div>
+            <div class="sales-insight-card">
+              <div class="sales-summary-label">Avg unit price</div>
+              <div class="sales-summary-value" data-sales-avg-price>--</div>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+    <script src="config.js"></script>
+    <script src="sales.js"></script>
+    <script src="user.js"></script>
+  </body>
+</html>

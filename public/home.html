@@ -23,6 +23,7 @@
           <div class="nav-dropdown-menu">
             <a class="nav-dropdown-link" href="profit.html">Profit calculator</a>
             <a class="nav-dropdown-link" href="expense.html">Expense tracker</a>
+            <a class="nav-dropdown-link" href="sales.html">Sales tracker</a>
             <a class="nav-dropdown-link" href="notes.html">Post-it notes</a>
           </div>
         </details>
@@ -43,16 +44,76 @@
         <span class="upload-status" data-upload-status aria-live="polite"></span>
       </div>
     </header>
-    <main class="app-layout">
+    <main class="app-layout app-layout-home">
       <section class="home-intro">
         <div class="home-intro-label">Welcome</div>
         <h1 class="home-intro-title">Choose a service to get started.</h1>
         <p class="home-intro-text">
-          Use the Services menu to open Post-it notes or the Profit calculator.
+          Use the Services menu to open Post-it notes, expenses, sales, or the profit calculator.
         </p>
+      </section>
+      <section class="home-dashboard">
+        <section class="dashboard-panel">
+          <div class="dashboard-header">
+            <div>
+              <div class="dashboard-title">Profit sync</div>
+              <div class="dashboard-subtitle">Expenses vs sales profit.</div>
+            </div>
+            <button class="ghost" type="button" data-dashboard-refresh>Refresh</button>
+          </div>
+          <div class="expense-chart">
+            <div class="expense-chart-bars">
+              <div class="expense-chart-column">
+                <div class="expense-chart-stack">
+                  <span class="expense-chart-fill" data-dashboard-bar="invested"></span>
+                </div>
+                <div class="expense-chart-label">Invested</div>
+                <div class="expense-chart-value" data-dashboard-value="invested">--</div>
+              </div>
+              <div class="expense-chart-column">
+                <div class="expense-chart-stack">
+                  <span class="expense-chart-fill" data-dashboard-bar="profit"></span>
+                </div>
+                <div class="expense-chart-label">Profit</div>
+                <div class="expense-chart-value" data-dashboard-value="profit">--</div>
+              </div>
+            </div>
+          </div>
+          <div class="dashboard-meta">
+            <span class="dashboard-status" data-dashboard-status>Sign in to sync.</span>
+            <span class="dashboard-updated" data-dashboard-updated></span>
+          </div>
+        </section>
+        <section class="dashboard-panel">
+          <div class="dashboard-header">
+            <div>
+              <div class="dashboard-title">Sales tracker</div>
+              <div class="dashboard-subtitle">Log sales to power profit sync.</div>
+            </div>
+            <a class="ghost" href="sales.html">Open sales</a>
+          </div>
+          <div class="dashboard-metrics">
+            <div class="dashboard-metric">
+              <div class="dashboard-metric-label">Sales total</div>
+              <div class="dashboard-metric-value" data-dashboard-sales-total>--</div>
+            </div>
+            <div class="dashboard-metric">
+              <div class="dashboard-metric-label">Sales entries</div>
+              <div class="dashboard-metric-value" data-dashboard-sales-count>--</div>
+            </div>
+            <div class="dashboard-metric">
+              <div class="dashboard-metric-label">Expenses total</div>
+              <div class="dashboard-metric-value" data-dashboard-expense-total>--</div>
+            </div>
+          </div>
+          <div class="dashboard-hint">
+            Add sales in the tracker and expenses in the expense tracker to update profit.
+          </div>
+        </section>
       </section>
     </main>
     <script src="config.js"></script>
+    <script src="dashboard.js"></script>
     <script src="user.js"></script>
   </body>
 </html>

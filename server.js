@@ -245,6 +245,20 @@ async function initDb() {
   `);
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS sales (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      units TEXT NOT NULL,
+      unit_price TEXT NOT NULL,
+      total TEXT NOT NULL,
+      currency TEXT,
+      sale_date TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS profit_snapshots (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -575,6 +589,7 @@ async function migrateEncryptedData() {
   await migrateMessages();
   await migrateFolderKeys();
   await migrateExpenses();
+  await migrateSales();
   await migrateProfitSnapshots();
 }
 
@@ -914,6 +929,62 @@ async function migrateExpenses() {
       values.push(row.id);
       await pool.query(
         `UPDATE expenses SET ${updates.join(", ")} WHERE id = $${index}`,
+        values
+      );
+    }
+  }
+}
+
+async function migrateSales() {
+  const result = await pool.query(
+    "SELECT id, name, units, unit_price, total, currency, sale_date FROM sales"
+  );
+
+  for (const row of result.rows) {
+    const updates = [];
+    const values = [];
+    let index = 1;
+
+    if (row.name && !isEncryptedValue(row.name)) {
+      updates.push(`name = $${index}`);
+      values.push(encryptAtRest(row.name));
+      index += 1;
+    }
+
+    if (row.units && !isEncryptedValue(row.units)) {
+      updates.push(`units = $${index}`);
+      values.push(encryptAtRest(row.units));
+      index += 1;
+    }
+
+    if (row.unit_price && !isEncryptedValue(row.unit_price)) {
+      updates.push(`unit_price = $${index}`);
+      values.push(encryptAtRest(row.unit_price));
+      index += 1;
+    }
+
+    if (row.total && !isEncryptedValue(row.total)) {
+      updates.push(`total = $${index}`);
+      values.push(encryptAtRest(row.total));
+      index += 1;
+    }
+
+    if (row.currency && !isEncryptedValue(row.currency)) {
+      updates.push(`currency = $${index}`);
+      values.push(encryptAtRest(row.currency));
+      index += 1;
+    }
+
+    if (row.sale_date && !isEncryptedValue(row.sale_date)) {
+      updates.push(`sale_date = $${index}`);
+      values.push(encryptAtRest(row.sale_date));
+      index += 1;
+    }
+
+    if (updates.length) {
+      values.push(row.id);
+      await pool.query(
+        `UPDATE sales SET ${updates.join(", ")} WHERE id = $${index}`,
         values
       );
     }
@@ -1921,6 +1992,43 @@ app.get("/api/expenses", async (req, res) => {
   }
 });
 
+app.get("/api/expenses/summary", async (req, res) => {
+  const token = getTokenFromRequest(req);
+
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+
+  try {
+    const user = await getUserFromToken(token);
+
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized." });
+    }
+
+    const result = await pool.query(
+      "SELECT amount FROM expenses WHERE user_id = $1",
+      [user.id]
+    );
+
+    let total = 0;
+    result.rows.forEach((row) => {
+      const amount = Number.parseFloat(decryptAtRest(row.amount));
+      if (Number.isFinite(amount)) {
+        total += amount;
+      }
+    });
+
+    return res.json({
+      ok: true,
+      summary: { total, count: result.rows.length }
+    });
+  } catch (error) {
+    console.error("Expense summary failed:", error);
+    return res.status(500).json({ error: "Unable to load expense summary." });
+  }
+});
+
 app.post("/api/expenses", async (req, res) => {
   const token = getTokenFromRequest(req);
   const nameInput = typeof req.body.name === "string" ? req.body.name.trim() : "";
@@ -2048,6 +2156,234 @@ app.delete("/api/expenses", async (req, res) => {
   } catch (error) {
     console.error("Expense clear failed:", error);
     return res.status(500).json({ error: "Unable to clear expenses." });
+  }
+});
+
+app.get("/api/sales", async (req, res) => {
+  const token = getTokenFromRequest(req);
+
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+
+  try {
+    const user = await getUserFromToken(token);
+
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized." });
+    }
+
+    const result = await pool.query(
+      `
+        SELECT id,
+               name,
+               units,
+               unit_price,
+               total,
+               currency,
+               sale_date,
+               created_at
+        FROM sales
+        WHERE user_id = $1
+        ORDER BY created_at DESC, id DESC
+      `,
+      [user.id]
+    );
+
+    const sales = decryptRows(result.rows, [
+      "name",
+      "units",
+      "unit_price",
+      "total",
+      "currency",
+      "sale_date"
+    ]);
+    sales.forEach((sale) => {
+      const units = Number.parseFloat(sale.units);
+      const unitPrice = Number.parseFloat(sale.unit_price);
+      const total = Number.parseFloat(sale.total);
+      sale.units = Number.isFinite(units) ? units : null;
+      sale.unit_price = Number.isFinite(unitPrice) ? unitPrice : null;
+      sale.total = Number.isFinite(total) ? total : null;
+    });
+
+    return res.json({ ok: true, sales });
+  } catch (error) {
+    console.error("Sales lookup failed:", error);
+    return res.status(500).json({ error: "Unable to load sales." });
+  }
+});
+
+app.get("/api/sales/summary", async (req, res) => {
+  const token = getTokenFromRequest(req);
+
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+
+  try {
+    const user = await getUserFromToken(token);
+
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized." });
+    }
+
+    const result = await pool.query(
+      "SELECT total FROM sales WHERE user_id = $1",
+      [user.id]
+    );
+
+    let total = 0;
+    result.rows.forEach((row) => {
+      const value = Number.parseFloat(decryptAtRest(row.total));
+      if (Number.isFinite(value)) {
+        total += value;
+      }
+    });
+
+    return res.json({
+      ok: true,
+      summary: { total, count: result.rows.length }
+    });
+  } catch (error) {
+    console.error("Sales summary failed:", error);
+    return res.status(500).json({ error: "Unable to load sales summary." });
+  }
+});
+
+app.post("/api/sales", async (req, res) => {
+  const token = getTokenFromRequest(req);
+  const nameInput = typeof req.body.name === "string" ? req.body.name.trim() : "";
+  const unitsInput = Number.parseFloat(req.body.units);
+  const unitPriceInput = Number.parseFloat(req.body.unitPrice);
+  const dateInput = typeof req.body.date === "string" ? req.body.date.trim() : "";
+  const currencyInput =
+    typeof req.body.currency === "string" ? req.body.currency.trim().toUpperCase() : "";
+
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+
+  if (!Number.isFinite(unitsInput) || unitsInput <= 0) {
+    return res.status(400).json({ error: "Units must be greater than 0." });
+  }
+
+  if (!Number.isFinite(unitPriceInput) || unitPriceInput <= 0) {
+    return res.status(400).json({ error: "Unit price must be greater than 0." });
+  }
+
+  const nameValue = nameInput || "Untitled";
+  if (nameValue.length > 80) {
+    return res.status(400).json({ error: "Sale name is too long." });
+  }
+
+  if (dateInput.length > 32) {
+    return res.status(400).json({ error: "Date is too long." });
+  }
+
+  if (currencyInput.length > 6) {
+    return res.status(400).json({ error: "Currency is too long." });
+  }
+
+  const totalValue = unitsInput * unitPriceInput;
+
+  try {
+    const user = await getUserFromToken(token);
+
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized." });
+    }
+
+    const result = await pool.query(
+      `
+        INSERT INTO sales (user_id, name, units, unit_price, total, currency, sale_date)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING id,
+                  name,
+                  units,
+                  unit_price,
+                  total,
+                  currency,
+                  sale_date,
+                  created_at
+      `,
+      [
+        user.id,
+        encryptAtRest(nameValue),
+        encryptAtRest(String(unitsInput)),
+        encryptAtRest(String(unitPriceInput)),
+        encryptAtRest(String(totalValue)),
+        currencyInput ? encryptAtRest(currencyInput) : null,
+        dateInput ? encryptAtRest(dateInput) : null
+      ]
+    );
+
+    const sale = result.rows[0];
+    decryptRow(sale, ["name", "units", "unit_price", "total", "currency", "sale_date"]);
+    sale.units = unitsInput;
+    sale.unit_price = unitPriceInput;
+    sale.total = totalValue;
+    return res.status(201).json({ ok: true, sale });
+  } catch (error) {
+    console.error("Sale create failed:", error);
+    return res.status(500).json({ error: "Unable to save sale." });
+  }
+});
+
+app.delete("/api/sales/:id", async (req, res) => {
+  const token = getTokenFromRequest(req);
+  const saleId = Number.parseInt(req.params.id, 10);
+
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+
+  if (!Number.isInteger(saleId)) {
+    return res.status(400).json({ error: "Invalid sale id." });
+  }
+
+  try {
+    const user = await getUserFromToken(token);
+
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized." });
+    }
+
+    const result = await pool.query(
+      "DELETE FROM sales WHERE id = $1 AND user_id = $2 RETURNING id",
+      [saleId, user.id]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: "Sale not found." });
+    }
+
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error("Sale delete failed:", error);
+    return res.status(500).json({ error: "Unable to delete sale." });
+  }
+});
+
+app.delete("/api/sales", async (req, res) => {
+  const token = getTokenFromRequest(req);
+
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+
+  try {
+    const user = await getUserFromToken(token);
+
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized." });
+    }
+
+    await pool.query("DELETE FROM sales WHERE user_id = $1", [user.id]);
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error("Sales clear failed:", error);
+    return res.status(500).json({ error: "Unable to clear sales." });
   }
 });
 

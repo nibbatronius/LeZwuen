@@ -213,62 +213,38 @@
       }
       expenses = Array.isArray(data.expenses) ? data.expenses : [];
       renderExpenses();
+      updateProfitDisplay();
       setStatus("");
     } catch (error) {
       setStatus("Unable to load expenses.", "error");
     }
   }
 
-  async function fetchProfitSnapshot() {
+  async function fetchSalesSummary() {
     const token = getAuthToken();
     if (!token) {
       return null;
     }
     try {
-      const response = await fetch(apiUrl("/api/profit-snapshot"), {
+      const response = await fetch(apiUrl("/api/sales/summary"), {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         return null;
       }
-      return data.snapshot || null;
+      return data.summary || null;
     } catch (error) {
       return null;
     }
   }
 
-  function renderProfitSnapshot(snapshot) {
-    if (!snapshot || typeof snapshot.invested !== "number" || typeof snapshot.profit !== "number") {
-      if (investedValue) {
-        investedValue.textContent = "--";
-      }
-      if (profitValue) {
-        profitValue.textContent = "--";
-        profitValue.removeAttribute("data-type");
-      }
-      if (investedBar) {
-        investedBar.style.height = "0%";
-      }
-      if (profitBar) {
-        profitBar.style.height = "0%";
-        profitBar.removeAttribute("data-type");
-      }
-      if (profitStatus) {
-        profitStatus.textContent = "Open the profit calculator to sync data.";
-      }
-      if (profitUpdated) {
-        profitUpdated.textContent = "";
-      }
-      return;
-    }
-
-    const currency = snapshot.currency || (currencySelect ? currencySelect.value : "USD");
-    const invested = snapshot.invested;
-    const profit = snapshot.profit;
+  function renderProfitSync(investedTotal, salesTotal) {
+    const profit = salesTotal - investedTotal;
+    const currency = currencySelect ? currencySelect.value : "USD";
 
     if (investedValue) {
-      investedValue.textContent = formatCurrency(invested, currency);
+      investedValue.textContent = formatCurrency(investedTotal, currency);
     }
     if (profitValue) {
       profitValue.textContent = formatCurrency(profit, currency);
@@ -279,8 +255,8 @@
       }
     }
 
-    const maxValue = Math.max(Math.abs(invested), Math.abs(profit), 1);
-    const investedPercent = Math.min((Math.abs(invested) / maxValue) * 100, 100);
+    const maxValue = Math.max(Math.abs(investedTotal), Math.abs(profit), 1);
+    const investedPercent = Math.min((Math.abs(investedTotal) / maxValue) * 100, 100);
     const profitPercent = Math.min((Math.abs(profit) / maxValue) * 100, 100);
 
     if (investedBar) {
@@ -296,25 +272,54 @@
     }
 
     if (profitStatus) {
-      profitStatus.textContent = "Synced from profit calculator.";
+      profitStatus.textContent = "Synced with sales tracker.";
     }
     if (profitUpdated) {
-      const updated = snapshot.updated_at ? new Date(snapshot.updated_at) : null;
-      profitUpdated.textContent = updated && !Number.isNaN(updated.getTime())
-        ? `Last sync: ${updated.toLocaleString()}`
-        : "";
+      profitUpdated.textContent = `Last refresh: ${new Date().toLocaleString()}`;
     }
   }
 
   async function updateProfitDisplay() {
-    const snapshot = await fetchProfitSnapshot();
-    if (!snapshot && profitStatus) {
-      const token = getAuthToken();
-      profitStatus.textContent = token
-        ? "Open the profit calculator to sync data."
-        : "Sign in to sync profit data.";
+    const token = getAuthToken();
+    if (!token) {
+      if (profitStatus) {
+        profitStatus.textContent = "Sign in to sync sales and expenses.";
+      }
+      if (investedValue) {
+        investedValue.textContent = "--";
+      }
+      if (profitValue) {
+        profitValue.textContent = "--";
+        profitValue.removeAttribute("data-type");
+      }
+      if (investedBar) {
+        investedBar.style.height = "0%";
+      }
+      if (profitBar) {
+        profitBar.style.height = "0%";
+        profitBar.removeAttribute("data-type");
+      }
+      if (profitUpdated) {
+        profitUpdated.textContent = "";
+      }
+      return;
     }
-    renderProfitSnapshot(snapshot);
+
+    const investedTotal = expenses.reduce((sum, expense) => sum + (expense.amount || 0), 0);
+    const salesSummary = await fetchSalesSummary();
+    if (!salesSummary) {
+      if (profitStatus) {
+        profitStatus.textContent = "Log sales to see profit.";
+      }
+      if (profitUpdated) {
+        profitUpdated.textContent = "";
+      }
+      renderProfitSync(investedTotal, 0);
+      return;
+    }
+
+    const salesTotal = Number.isFinite(salesSummary.total) ? salesSummary.total : 0;
+    renderProfitSync(investedTotal, salesTotal);
   }
 
   function setupCurrency() {
@@ -388,6 +393,7 @@
         if (data && data.expense) {
           expenses.unshift(data.expense);
           renderExpenses();
+          updateProfitDisplay();
         }
         if (nameInput) {
           nameInput.value = "";
@@ -431,6 +437,7 @@
           }
           expenses = expenses.filter((expense) => String(expense.id) !== String(id));
           renderExpenses();
+          updateProfitDisplay();
           setStatus("Expense removed.", "success");
         })
         .catch((error) => {
@@ -457,6 +464,7 @@
           }
           expenses = [];
           renderExpenses();
+          updateProfitDisplay();
           setStatus("All expenses cleared.", "success");
         })
         .catch((error) => {
