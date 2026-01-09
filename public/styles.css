@@ -181,6 +181,53 @@ body::after {
   background: rgba(140, 247, 196, 0.08);
 }
 
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 12, 18, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 999;
+}
+
+.modal-card {
+  width: min(420px, 100%);
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+  padding: 24px;
+  display: grid;
+  gap: 12px;
+}
+
+.modal-title {
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.modal-text {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.modal-form {
+  display: grid;
+  gap: 12px;
+}
+
+.modal-input {
+  width: 100%;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
 .brand {
   display: flex;
   align-items: center;

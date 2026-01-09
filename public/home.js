@@ -144,7 +144,11 @@
     }
 
     unlockInProgress = true;
-    const password = window.prompt("Enter your password to unlock encrypted notes.");
+    const password = window.LeZwuenCrypto.requestPassword
+      ? await window.LeZwuenCrypto.requestPassword(
+          "Enter your password to unlock encrypted notes."
+        )
+      : window.prompt("Enter your password to unlock encrypted notes.");
     unlockInProgress = false;
     if (!password) {
       return false;

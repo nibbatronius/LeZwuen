@@ -13,6 +13,10 @@
   let idleTimeoutMs = DEFAULT_IDLE_TIMEOUT;
   let idleTimer = null;
   let activityListenersAttached = false;
+  let passwordModal = null;
+  let passwordResolve = null;
+  let passwordReject = null;
+  let lastFocusedElement = null;
 
   function arrayBufferToBase64(buffer) {
     const bytes = new Uint8Array(buffer);
@@ -84,6 +88,115 @@
         }
       }, 30000);
     }
+  }
+
+  function buildPasswordModal() {
+    if (passwordModal) {
+      return passwordModal;
+    }
+
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.hidden = true;
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
+
+    const modal = document.createElement("div");
+    modal.className = "modal-card";
+
+    const title = document.createElement("div");
+    title.className = "modal-title";
+    title.textContent = "Unlock encryption";
+
+    const text = document.createElement("div");
+    text.className = "modal-text";
+
+    const form = document.createElement("form");
+    form.className = "modal-form";
+
+    const input = document.createElement("input");
+    input.className = "modal-input";
+    input.type = "password";
+    input.autocomplete = "current-password";
+    input.placeholder = "Password";
+    input.required = true;
+
+    const actions = document.createElement("div");
+    actions.className = "modal-actions";
+
+    const cancelButton = document.createElement("button");
+    cancelButton.type = "button";
+    cancelButton.className = "ghost";
+    cancelButton.textContent = "Cancel";
+
+    const confirmButton = document.createElement("button");
+    confirmButton.type = "submit";
+    confirmButton.className = "primary";
+    confirmButton.textContent = "Unlock";
+
+    actions.append(cancelButton, confirmButton);
+    form.append(input, actions);
+    modal.append(title, text, form);
+    overlay.append(modal);
+    document.body.appendChild(overlay);
+
+    function closeModal(value) {
+      overlay.hidden = true;
+      const resolver = passwordResolve;
+      passwordResolve = null;
+      passwordReject = null;
+      if (lastFocusedElement && typeof lastFocusedElement.focus === "function") {
+        lastFocusedElement.focus();
+      }
+      lastFocusedElement = null;
+      if (resolver) {
+        resolver(value);
+      }
+    }
+
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) {
+        closeModal(null);
+      }
+    });
+
+    cancelButton.addEventListener("click", () => {
+      closeModal(null);
+    });
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const value = input.value;
+      input.value = "";
+      closeModal(value || null);
+    });
+
+    overlay.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        closeModal(null);
+      }
+    });
+
+    passwordModal = { overlay, text, input };
+    return passwordModal;
+  }
+
+  function requestPassword(promptText) {
+    if (passwordResolve) {
+      return Promise.resolve(null);
+    }
+
+    const modal = buildPasswordModal();
+    modal.text.textContent = promptText || "Enter your password.";
+    modal.input.value = "";
+    modal.overlay.hidden = false;
+    lastFocusedElement = document.activeElement;
+    modal.input.focus();
+
+    return new Promise((resolve, reject) => {
+      passwordResolve = resolve;
+      passwordReject = reject;
+    });
   }
 
   async function importPublicKey(base64) {
@@ -291,6 +404,7 @@
     noteActivity,
     lockNow,
     startAutoLock,
+    requestPassword,
     getPrivateKey,
     getPublicKey,
     importPublicKey,

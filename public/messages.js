@@ -129,7 +129,11 @@
     }
 
     unlockInProgress = true;
-    const password = window.prompt("Enter your password to unlock encrypted messages.");
+    const password = window.LeZwuenCrypto.requestPassword
+      ? await window.LeZwuenCrypto.requestPassword(
+          "Enter your password to unlock encrypted messages."
+        )
+      : window.prompt("Enter your password to unlock encrypted messages.");
     unlockInProgress = false;
     if (!password) {
       return false;
