@@ -596,6 +596,11 @@ body::after {
   gap: 12px;
 }
 
+.profit-header-copy {
+  display: grid;
+  gap: 2px;
+}
+
 .profit-title {
   font-size: 1rem;
   letter-spacing: 0.04em;

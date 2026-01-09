@@ -96,13 +96,17 @@
         </section>
         <section class="profit-panel profit-panel-summary">
           <div class="profit-panel-header">
-            <div>
+            <div class="profit-header-copy" data-dashboard-header="summary">
               <div class="profit-title">Summary</div>
               <div class="profit-subtitle">Revenue, margin, breakeven, and more.</div>
             </div>
+            <div class="profit-header-copy" data-dashboard-header="goal" hidden>
+              <div class="profit-title">Goals</div>
+              <div class="profit-subtitle">Set targets and track sales progress.</div>
+            </div>
             <button class="ghost" type="button" data-dashboard-toggle>View Goals</button>
           </div>
-          <div class="profit-actions">
+          <div class="profit-actions" data-dashboard-actions="summary">
             <button class="primary" type="button" data-save>Save JSON</button>
             <button class="ghost" type="button" data-load>Load JSON</button>
             <input type="file" accept="application/json" data-load-input hidden />

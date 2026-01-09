@@ -12,6 +12,8 @@
   const dashboardToggle = document.querySelector("[data-dashboard-toggle]");
   const summaryDashboard = document.querySelector("[data-dashboard='summary']");
   const goalDashboard = document.querySelector("[data-dashboard='goal']");
+  const dashboardHeaders = Array.from(document.querySelectorAll("[data-dashboard-header]"));
+  const dashboardActions = Array.from(document.querySelectorAll("[data-dashboard-actions]"));
   const saveButton = document.querySelector("[data-save]");
   const loadButton = document.querySelector("[data-load]");
   const loadInput = document.querySelector("[data-load-input]");
@@ -307,6 +309,16 @@
     }
     if (dashboardToggle) {
       dashboardToggle.textContent = view === "summary" ? "View Goals" : "View Summary";
+    }
+    if (dashboardHeaders.length) {
+      dashboardHeaders.forEach((header) => {
+        header.hidden = header.dataset.dashboardHeader !== view;
+      });
+    }
+    if (dashboardActions.length) {
+      dashboardActions.forEach((actions) => {
+        actions.hidden = actions.dataset.dashboardActions !== view;
+      });
     }
   }
 
