@@ -231,6 +231,34 @@ async function initDb() {
     );
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS expenses (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      amount TEXT NOT NULL,
+      currency TEXT,
+      category TEXT,
+      expense_date TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS profit_snapshots (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      currency TEXT,
+      invested TEXT,
+      profit TEXT,
+      revenue TEXT,
+      margin TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (user_id)
+    );
+  `);
+
   await pool.query(
     "CREATE UNIQUE INDEX IF NOT EXISTS users_email_hash_unique ON users(email_hash);"
   );
@@ -546,6 +574,8 @@ async function migrateEncryptedData() {
   await migratePostIts();
   await migrateMessages();
   await migrateFolderKeys();
+  await migrateExpenses();
+  await migrateProfitSnapshots();
 }
 
 async function migrateUsers() {
@@ -834,6 +864,106 @@ async function migrateFolderKeys() {
       values.push(row.id);
       await pool.query(
         `UPDATE folder_keys SET ${updates.join(", ")} WHERE id = $${index}`,
+        values
+      );
+    }
+  }
+}
+
+async function migrateExpenses() {
+  const result = await pool.query(
+    "SELECT id, name, amount, currency, category, expense_date FROM expenses"
+  );
+
+  for (const row of result.rows) {
+    const updates = [];
+    const values = [];
+    let index = 1;
+
+    if (row.name && !isEncryptedValue(row.name)) {
+      updates.push(`name = $${index}`);
+      values.push(encryptAtRest(row.name));
+      index += 1;
+    }
+
+    if (row.amount && !isEncryptedValue(row.amount)) {
+      updates.push(`amount = $${index}`);
+      values.push(encryptAtRest(row.amount));
+      index += 1;
+    }
+
+    if (row.currency && !isEncryptedValue(row.currency)) {
+      updates.push(`currency = $${index}`);
+      values.push(encryptAtRest(row.currency));
+      index += 1;
+    }
+
+    if (row.category && !isEncryptedValue(row.category)) {
+      updates.push(`category = $${index}`);
+      values.push(encryptAtRest(row.category));
+      index += 1;
+    }
+
+    if (row.expense_date && !isEncryptedValue(row.expense_date)) {
+      updates.push(`expense_date = $${index}`);
+      values.push(encryptAtRest(row.expense_date));
+      index += 1;
+    }
+
+    if (updates.length) {
+      values.push(row.id);
+      await pool.query(
+        `UPDATE expenses SET ${updates.join(", ")} WHERE id = $${index}`,
+        values
+      );
+    }
+  }
+}
+
+async function migrateProfitSnapshots() {
+  const result = await pool.query(
+    "SELECT id, currency, invested, profit, revenue, margin FROM profit_snapshots"
+  );
+
+  for (const row of result.rows) {
+    const updates = [];
+    const values = [];
+    let index = 1;
+
+    if (row.currency && !isEncryptedValue(row.currency)) {
+      updates.push(`currency = $${index}`);
+      values.push(encryptAtRest(row.currency));
+      index += 1;
+    }
+
+    if (row.invested && !isEncryptedValue(row.invested)) {
+      updates.push(`invested = $${index}`);
+      values.push(encryptAtRest(row.invested));
+      index += 1;
+    }
+
+    if (row.profit && !isEncryptedValue(row.profit)) {
+      updates.push(`profit = $${index}`);
+      values.push(encryptAtRest(row.profit));
+      index += 1;
+    }
+
+    if (row.revenue && !isEncryptedValue(row.revenue)) {
+      updates.push(`revenue = $${index}`);
+      values.push(encryptAtRest(row.revenue));
+      index += 1;
+    }
+
+    if (row.margin && !isEncryptedValue(row.margin)) {
+      updates.push(`margin = $${index}`);
+      values.push(encryptAtRest(row.margin));
+      index += 1;
+    }
+
+    if (updates.length) {
+      values.push(row.id);
+      await pool.query(
+        `UPDATE profit_snapshots SET ${updates.join(", ")} WHERE id = $${index}`,
         values
       );
     }
@@ -1740,6 +1870,329 @@ app.delete("/api/post-its/:id", async (req, res) => {
   } catch (error) {
     console.error("Post-it delete failed:", error);
     return res.status(500).json({ error: "Unable to delete note." });
+  }
+});
+
+app.get("/api/expenses", async (req, res) => {
+  const token = getTokenFromRequest(req);
+
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+
+  try {
+    const user = await getUserFromToken(token);
+
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized." });
+    }
+
+    const result = await pool.query(
+      `
+        SELECT id,
+               name,
+               amount,
+               currency,
+               category,
+               expense_date,
+               created_at
+        FROM expenses
+        WHERE user_id = $1
+        ORDER BY created_at DESC, id DESC
+      `,
+      [user.id]
+    );
+
+    const expenses = decryptRows(result.rows, [
+      "name",
+      "amount",
+      "currency",
+      "category",
+      "expense_date"
+    ]);
+    expenses.forEach((expense) => {
+      const parsedAmount = Number.parseFloat(expense.amount);
+      expense.amount = Number.isFinite(parsedAmount) ? parsedAmount : null;
+    });
+    return res.json({ ok: true, expenses });
+  } catch (error) {
+    console.error("Expense lookup failed:", error);
+    return res.status(500).json({ error: "Unable to load expenses." });
+  }
+});
+
+app.post("/api/expenses", async (req, res) => {
+  const token = getTokenFromRequest(req);
+  const nameInput = typeof req.body.name === "string" ? req.body.name.trim() : "";
+  const amountInput = Number.parseFloat(req.body.amount);
+  const categoryInput = typeof req.body.category === "string" ? req.body.category.trim() : "";
+  const dateInput = typeof req.body.date === "string" ? req.body.date.trim() : "";
+  const currencyInput =
+    typeof req.body.currency === "string" ? req.body.currency.trim().toUpperCase() : "";
+
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+
+  if (!Number.isFinite(amountInput) || amountInput <= 0) {
+    return res.status(400).json({ error: "Amount must be greater than 0." });
+  }
+
+  const nameValue = nameInput || "Untitled";
+  if (nameValue.length > 80) {
+    return res.status(400).json({ error: "Expense name is too long." });
+  }
+
+  if (categoryInput.length > 40) {
+    return res.status(400).json({ error: "Category is too long." });
+  }
+
+  if (dateInput.length > 32) {
+    return res.status(400).json({ error: "Date is too long." });
+  }
+
+  if (currencyInput.length > 6) {
+    return res.status(400).json({ error: "Currency is too long." });
+  }
+
+  try {
+    const user = await getUserFromToken(token);
+
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized." });
+    }
+
+    const result = await pool.query(
+      `
+        INSERT INTO expenses (user_id, name, amount, currency, category, expense_date)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id,
+                  name,
+                  amount,
+                  currency,
+                  category,
+                  expense_date,
+                  created_at
+      `,
+      [
+        user.id,
+        encryptAtRest(nameValue),
+        encryptAtRest(String(amountInput)),
+        currencyInput ? encryptAtRest(currencyInput) : null,
+        categoryInput ? encryptAtRest(categoryInput) : null,
+        dateInput ? encryptAtRest(dateInput) : null
+      ]
+    );
+
+    const expense = result.rows[0];
+    decryptRow(expense, ["name", "amount", "currency", "category", "expense_date"]);
+    expense.amount = amountInput;
+    return res.status(201).json({ ok: true, expense });
+  } catch (error) {
+    console.error("Expense create failed:", error);
+    return res.status(500).json({ error: "Unable to save expense." });
+  }
+});
+
+app.delete("/api/expenses/:id", async (req, res) => {
+  const token = getTokenFromRequest(req);
+  const expenseId = Number.parseInt(req.params.id, 10);
+
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+
+  if (!Number.isInteger(expenseId)) {
+    return res.status(400).json({ error: "Invalid expense id." });
+  }
+
+  try {
+    const user = await getUserFromToken(token);
+
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized." });
+    }
+
+    const result = await pool.query(
+      "DELETE FROM expenses WHERE id = $1 AND user_id = $2 RETURNING id",
+      [expenseId, user.id]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: "Expense not found." });
+    }
+
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error("Expense delete failed:", error);
+    return res.status(500).json({ error: "Unable to delete expense." });
+  }
+});
+
+app.delete("/api/expenses", async (req, res) => {
+  const token = getTokenFromRequest(req);
+
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+
+  try {
+    const user = await getUserFromToken(token);
+
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized." });
+    }
+
+    await pool.query("DELETE FROM expenses WHERE user_id = $1", [user.id]);
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error("Expense clear failed:", error);
+    return res.status(500).json({ error: "Unable to clear expenses." });
+  }
+});
+
+app.get("/api/profit-snapshot", async (req, res) => {
+  const token = getTokenFromRequest(req);
+
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+
+  try {
+    const user = await getUserFromToken(token);
+
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized." });
+    }
+
+    const result = await pool.query(
+      `
+        SELECT currency,
+               invested,
+               profit,
+               revenue,
+               margin,
+               updated_at
+        FROM profit_snapshots
+        WHERE user_id = $1
+        LIMIT 1
+      `,
+      [user.id]
+    );
+
+    if (!result.rows.length) {
+      return res.json({ ok: true, snapshot: null });
+    }
+
+    const snapshot = result.rows[0];
+    decryptRow(snapshot, ["currency", "invested", "profit", "revenue", "margin"]);
+    const investedValue = Number.parseFloat(snapshot.invested);
+    const profitValue = Number.parseFloat(snapshot.profit);
+    const revenueValue = Number.parseFloat(snapshot.revenue);
+    const marginValue = Number.parseFloat(snapshot.margin);
+    snapshot.invested = Number.isFinite(investedValue) ? investedValue : null;
+    snapshot.profit = Number.isFinite(profitValue) ? profitValue : null;
+    snapshot.revenue = Number.isFinite(revenueValue) ? revenueValue : null;
+    snapshot.margin =
+      snapshot.margin === null || snapshot.margin === undefined || snapshot.margin === ""
+        ? null
+        : Number.isFinite(marginValue)
+          ? marginValue
+          : null;
+    return res.json({ ok: true, snapshot });
+  } catch (error) {
+    console.error("Profit snapshot lookup failed:", error);
+    return res.status(500).json({ error: "Unable to load profit snapshot." });
+  }
+});
+
+app.post("/api/profit-snapshot", async (req, res) => {
+  const token = getTokenFromRequest(req);
+  const currencyInput =
+    typeof req.body.currency === "string" ? req.body.currency.trim().toUpperCase() : "";
+  const investedInput = Number.parseFloat(req.body.invested);
+  const profitInput = Number.parseFloat(req.body.profit);
+  const revenueInput = Number.parseFloat(req.body.revenue);
+  const marginInput = Number.parseFloat(req.body.margin);
+
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+
+  if (!Number.isFinite(investedInput) || !Number.isFinite(profitInput) || !Number.isFinite(revenueInput)) {
+    return res.status(400).json({ error: "Invalid profit snapshot values." });
+  }
+
+  const marginValue = Number.isFinite(marginInput) ? String(marginInput) : null;
+  const currencyValue = currencyInput || "USD";
+
+  try {
+    const user = await getUserFromToken(token);
+
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized." });
+    }
+
+    const result = await pool.query(
+      `
+        INSERT INTO profit_snapshots (user_id, currency, invested, profit, revenue, margin)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (user_id)
+        DO UPDATE SET currency = EXCLUDED.currency,
+                      invested = EXCLUDED.invested,
+                      profit = EXCLUDED.profit,
+                      revenue = EXCLUDED.revenue,
+                      margin = EXCLUDED.margin,
+                      updated_at = NOW()
+        RETURNING currency,
+                  invested,
+                  profit,
+                  revenue,
+                  margin,
+                  updated_at
+      `,
+      [
+        user.id,
+        encryptAtRest(currencyValue),
+        encryptAtRest(String(investedInput)),
+        encryptAtRest(String(profitInput)),
+        encryptAtRest(String(revenueInput)),
+        marginValue ? encryptAtRest(marginValue) : null
+      ]
+    );
+
+    const snapshot = result.rows[0];
+    decryptRow(snapshot, ["currency", "invested", "profit", "revenue", "margin"]);
+    snapshot.invested = investedInput;
+    snapshot.profit = profitInput;
+    snapshot.revenue = revenueInput;
+    snapshot.margin = marginValue ? Number.parseFloat(marginValue) : null;
+    return res.json({ ok: true, snapshot });
+  } catch (error) {
+    console.error("Profit snapshot save failed:", error);
+    return res.status(500).json({ error: "Unable to save profit snapshot." });
+  }
+});
+
+app.delete("/api/profit-snapshot", async (req, res) => {
+  const token = getTokenFromRequest(req);
+
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+
+  try {
+    const user = await getUserFromToken(token);
+
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized." });
+    }
+
+    await pool.query("DELETE FROM profit_snapshots WHERE user_id = $1", [user.id]);
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error("Profit snapshot delete failed:", error);
+    return res.status(500).json({ error: "Unable to delete profit snapshot." });
   }
 });
 

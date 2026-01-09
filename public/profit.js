@@ -73,9 +73,12 @@
     "CNY"
   ];
   const currencyCodes = new Set(currencyOptions.map((code) => code.toUpperCase()));
+  const apiBaseUrl =
+    window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL ? window.APP_CONFIG.API_BASE_URL : "";
 
   let productRows = [];
   let activeDashboard = "summary";
+  let profitSaveTimer = null;
   let goalData = {
     revenue: null,
     profit: null,
@@ -131,6 +134,61 @@
     }
     const parsed = Number.parseFloat(cleaned);
     return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  function apiUrl(path) {
+    if (!apiBaseUrl) {
+      return path;
+    }
+    return new URL(path, apiBaseUrl).toString();
+  }
+
+  function getAuthToken() {
+    return localStorage.getItem("lezwuenAuthToken");
+  }
+
+  function scheduleProfitSnapshot(cogs, overhead) {
+    if (currentMetrics.revenue === null || currentMetrics.profit === null) {
+      return;
+    }
+    if (cogs === null || overhead === null) {
+      return;
+    }
+    const token = getAuthToken();
+    if (!token) {
+      return;
+    }
+    if (profitSaveTimer) {
+      clearTimeout(profitSaveTimer);
+    }
+    const payload = {
+      currency: currencySelect.value,
+      invested: cogs + overhead,
+      profit: currentMetrics.profit,
+      revenue: currentMetrics.revenue,
+      margin: currentMetrics.margin
+    };
+    profitSaveTimer = setTimeout(() => {
+      fetch(apiUrl("/api/profit-snapshot"), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+      }).catch(() => {});
+    }, 500);
+  }
+
+  function clearProfitSnapshot() {
+    const token = getAuthToken();
+    if (!token) {
+      return;
+    }
+    fetch(apiUrl("/api/profit-snapshot"), {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` }
+    }).catch(() => {});
   }
 
   function safeString(value) {
@@ -496,6 +554,7 @@
       cost_ratio: ratioValue
     };
 
+    scheduleProfitSnapshot(cogs, overhead);
     updateGoalProgress();
   }
 
@@ -706,6 +765,7 @@
       row.soldTotalInput.value = "";
     });
     updateMetrics();
+    clearProfitSnapshot();
   }
 
   function setupCurrencyOptions() {
