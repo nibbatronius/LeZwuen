@@ -1315,9 +1315,9 @@ app.patch("/api/profile", async (req, res) => {
       values
     );
 
-    const user = result.rows[0];
-    decryptRow(user, ["email", "display_name", "profile_image_url", "account_type"]);
-    return res.json({ ok: true, user });
+    const updatedUser = result.rows[0];
+    decryptRow(updatedUser, ["email", "display_name", "profile_image_url", "account_type"]);
+    return res.json({ ok: true, user: updatedUser });
   } catch (error) {
     if (error.code === "23505") {
       return res.status(409).json({ error: "Email is already registered." });
