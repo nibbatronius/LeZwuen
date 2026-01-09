@@ -117,6 +117,40 @@
               <button class="ghost" type="button" data-load>Load JSON</button>
               <input type="file" accept="application/json" data-load-input hidden />
             </div>
+            <section class="profit-section postit-save" data-postit-save="profit">
+              <div class="postit-save-header">
+                <div class="panel-title">Save to Post-it</div>
+                <button class="ghost" type="button" data-postit-refresh>Reload</button>
+              </div>
+              <div class="postit-save-row">
+                <label class="profit-field-label" for="profit-postit-folder">Folder</label>
+                <select
+                  class="postit-save-select"
+                  id="profit-postit-folder"
+                  data-postit-folder
+                ></select>
+              </div>
+              <div class="postit-save-inline">
+                <div class="postit-save-row">
+                  <label class="profit-field-label" for="profit-postit-new">New folder</label>
+                  <input
+                    class="postit-save-input"
+                    id="profit-postit-new"
+                    type="text"
+                    maxlength="32"
+                    placeholder="New folder name"
+                    data-postit-new
+                  />
+                </div>
+                <button class="ghost" type="button" data-postit-create>Create</button>
+              </div>
+              <div class="postit-save-actions">
+                <button class="primary" type="button" data-postit-save-button>
+                  Save to Post-it
+                </button>
+              </div>
+              <div class="postit-save-status" data-postit-status aria-live="polite"></div>
+            </section>
             <div class="profit-metrics">
               <div class="profit-metric">
                 <div class="profit-metric-label">Total revenue</div>
@@ -321,6 +355,8 @@
     </main>
     <script src="config.js"></script>
     <script src="shared-data.js"></script>
+    <script src="crypto.js"></script>
+    <script src="post-it-save.js"></script>
     <script src="owner-tools.js"></script>
     <script src="profit.js"></script>
     <script src="user.js"></script>

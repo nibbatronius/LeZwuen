@@ -111,6 +111,51 @@
     });
   }
 
+  function buildSalesNote() {
+    const lines = [];
+    const now = new Date();
+    const totalRevenue = sales.reduce((sum, sale) => sum + (sale.total || 0), 0);
+    const totalUnits = sales.reduce((sum, sale) => sum + (sale.units || 0), 0);
+    const count = sales.length;
+    const avgSale = count ? totalRevenue / count : null;
+    const avgUnitPrice = totalUnits ? totalRevenue / totalUnits : null;
+
+    lines.push("Sales Tracker Snapshot");
+    lines.push(`Date: ${now.toLocaleString()}`);
+    lines.push(`Currency: ${currencySelect ? currencySelect.value : "USD"}`);
+    lines.push("");
+    lines.push("Summary:");
+    lines.push(`- Total sales: ${formatCurrency(totalRevenue)}`);
+    lines.push(`- Entries: ${count}`);
+    lines.push(`- Total units: ${formatUnits(totalUnits)}`);
+    lines.push(`- Avg sale: ${avgSale !== null ? formatCurrency(avgSale) : "--"}`);
+    lines.push(`- Avg unit price: ${avgUnitPrice !== null ? formatCurrency(avgUnitPrice) : "--"}`);
+
+    lines.push("");
+    lines.push("Recent sales:");
+    if (!sales.length) {
+      lines.push("- No sales logged yet.");
+    } else {
+      sales
+        .slice()
+        .sort((a, b) => (b.sale_date || "").localeCompare(a.sale_date || ""))
+        .slice(0, 6)
+        .forEach((sale) => {
+          const units = sale.units !== null && sale.units !== undefined ? formatUnits(sale.units) : "--";
+          const total = sale.total !== undefined && sale.total !== null
+            ? sale.total
+            : (sale.units || 0) * (sale.unit_price || 0);
+          lines.push(
+            `- ${sale.name || "Untitled"}: ${units} units, ${formatCurrency(total)} on ${formatDate(
+              sale.sale_date
+            )}`
+          );
+        });
+    }
+
+    return lines.join("\n");
+  }
+
   function parseValue(rawValue) {
     const trimmed = String(rawValue || "").trim();
     if (!trimmed) {
@@ -504,6 +549,13 @@
       if (sharedData) {
         sharedData.setCurrency(currencySelect.value);
       }
+    });
+  }
+
+  if (window.LeZwuenPostItSave) {
+    window.LeZwuenPostItSave.init({
+      root: document.querySelector("[data-postit-save='sales']"),
+      getContent: buildSalesNote
     });
   }
 })();

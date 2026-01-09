@@ -104,6 +104,62 @@
     });
   }
 
+  function buildExpenseNote() {
+    const lines = [];
+    const now = new Date();
+    const summary = expenses.reduce(
+      (acc, expense) => {
+        const amount = expense.amount || 0;
+        const category = expense.category || "Other";
+        acc.total += amount;
+        acc.by_category[category] = (acc.by_category[category] || 0) + amount;
+        return acc;
+      },
+      { total: 0, by_category: {} }
+    );
+
+    lines.push("Expense Tracker Snapshot");
+    lines.push(`Date: ${now.toLocaleString()}`);
+    lines.push(`Currency: ${currencySelect ? currencySelect.value : "USD"}`);
+    lines.push("");
+    lines.push("Summary:");
+    lines.push(`- Total spent: ${formatCurrency(summary.total)}`);
+    lines.push(`- Entries: ${expenses.length}`);
+
+    lines.push("");
+    lines.push("By category:");
+    const categories = Object.entries(summary.by_category);
+    if (!categories.length) {
+      lines.push("- No expenses logged yet.");
+    } else {
+      categories
+        .sort((a, b) => b[1] - a[1])
+        .forEach(([category, amount]) => {
+          lines.push(`- ${category}: ${formatCurrency(amount)}`);
+        });
+    }
+
+    lines.push("");
+    lines.push("Recent expenses:");
+    if (!expenses.length) {
+      lines.push("- No expenses logged yet.");
+    } else {
+      expenses
+        .slice()
+        .sort((a, b) => (b.expense_date || "").localeCompare(a.expense_date || ""))
+        .slice(0, 6)
+        .forEach((expense) => {
+          lines.push(
+            `- ${expense.name || "Untitled"}: ${formatCurrency(expense.amount || 0)} (${expense.category || "Other"}) on ${formatDate(
+              expense.expense_date
+            )}`
+          );
+        });
+    }
+
+    return lines.join("\n");
+  }
+
   function parseAmount(rawValue) {
     const trimmed = String(rawValue || "").trim();
     if (!trimmed) {
@@ -550,5 +606,12 @@
 
   if (profitRefresh) {
     profitRefresh.addEventListener("click", updateProfitDisplay);
+  }
+
+  if (window.LeZwuenPostItSave) {
+    window.LeZwuenPostItSave.init({
+      root: document.querySelector("[data-postit-save='expense']"),
+      getContent: buildExpenseNote
+    });
   }
 })();

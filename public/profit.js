@@ -679,6 +679,144 @@
     }
   }
 
+  function buildProfitNote() {
+    const lines = [];
+    const now = new Date();
+    const cogs = parseValue(cogsInput.value);
+    const overhead = parseValue(overheadInput.value);
+    const totalRevenue = currentMetrics.revenue;
+    const totalCosts = currentMetrics.total_costs;
+
+    lines.push("Profit Calculator Snapshot");
+    lines.push(`Date: ${now.toLocaleString()}`);
+    lines.push(`Currency: ${currencySelect.value}`);
+    lines.push("");
+    lines.push("Summary:");
+    lines.push(`- Cost of goods: ${cogs !== null ? formatCurrency(cogs) : "--"}`);
+    lines.push(`- Operating costs: ${overhead !== null ? formatCurrency(overhead) : "--"}`);
+    lines.push(
+      `- Total revenue: ${
+        outputValues.revenue ? outputValues.revenue.textContent : "--"
+      }`
+    );
+    lines.push(
+      `- Net profit: ${
+        outputValues.profit ? outputValues.profit.textContent : "--"
+      }`
+    );
+    lines.push(
+      `- Gross margin: ${
+        currentMetrics.margin !== null ? formatPercent(currentMetrics.margin) : "--"
+      }`
+    );
+    lines.push(
+      `- Breakeven units: ${
+        currentMetrics.breakeven !== null ? `${Math.ceil(currentMetrics.breakeven)}` : "--"
+      }`
+    );
+    lines.push(
+      `- Avg price per unit: ${
+        currentMetrics.unit_price !== null ? formatCurrency(currentMetrics.unit_price) : "--"
+      }`
+    );
+    lines.push(
+      `- Cost ratio: ${
+        currentMetrics.cost_ratio !== null ? formatPercent(currentMetrics.cost_ratio) : "--"
+      }`
+    );
+
+    if (currentProducts.length) {
+      lines.push("");
+      lines.push("Products:");
+      currentProducts.forEach((product) => {
+        const unitsText = product.units !== null ? formatUnits(product.units) : "--";
+        const priceText = product.price !== null ? formatCurrency(product.price) : "--";
+        const revenueText = product.revenue !== null ? formatCurrency(product.revenue) : "--";
+        lines.push(`- ${product.label}: ${unitsText} units @ ${priceText} (Revenue: ${revenueText})`);
+      });
+    }
+
+    lines.push("");
+    lines.push("Contribution:");
+    if (totalRevenue !== null && totalRevenue > 0) {
+      currentProducts.forEach((product) => {
+        if (product.revenue === null) {
+          lines.push(`- ${product.label}: --`);
+          return;
+        }
+        const share = formatPercent((product.revenue / totalRevenue) * 100);
+        let contribution = "--";
+        if (totalCosts !== null) {
+          const allocatedCost = (product.revenue / totalRevenue) * totalCosts;
+          contribution = formatCurrency(product.revenue - allocatedCost);
+        }
+        lines.push(`- ${product.label}: ${share} share, ${contribution} contribution`);
+      });
+    } else {
+      lines.push("- Add product revenue to calculate contributions.");
+    }
+
+    if (sensitivitySlider) {
+      const delta = Number.parseFloat(sensitivitySlider.value);
+      const change = Number.isFinite(delta) ? delta : 0;
+      const multiplier = 1 + change / 100;
+      let adjustedRevenue = 0;
+      let pricedUnits = 0;
+
+      currentProducts.forEach((product) => {
+        if (product.units !== null && product.price !== null) {
+          adjustedRevenue += product.units * product.price * multiplier;
+          pricedUnits += product.units;
+        }
+      });
+
+      lines.push("");
+      lines.push("Price sensitivity:");
+      lines.push(`- Price change: ${formatSignedPercent(change)}`);
+      if (pricedUnits > 0) {
+        const adjustedProfit =
+          totalCosts !== null ? adjustedRevenue - totalCosts : null;
+        const adjustedUnitPrice = adjustedRevenue / pricedUnits;
+        const adjustedBreakeven =
+          totalCosts !== null && adjustedUnitPrice > 0 ? totalCosts / adjustedUnitPrice : null;
+        lines.push(`- Adj revenue: ${formatCurrency(adjustedRevenue)}`);
+        lines.push(
+          `- Adj profit: ${adjustedProfit !== null ? formatCurrency(adjustedProfit) : "--"}`
+        );
+        lines.push(
+          `- Adj breakeven: ${
+            adjustedBreakeven !== null ? `${Math.ceil(adjustedBreakeven)}` : "--"
+          }`
+        );
+      } else {
+        lines.push("- Add product pricing to see sensitivity.");
+      }
+    }
+
+    if (breakevenUnitsInput || breakevenPaceInput) {
+      const plannedUnits = breakevenUnitsInput ? parseValue(breakevenUnitsInput.value) : null;
+      const pace = breakevenPaceInput ? parseValue(breakevenPaceInput.value) : null;
+      const priceNeeded =
+        totalCosts !== null && plannedUnits !== null && plannedUnits > 0
+          ? totalCosts / plannedUnits
+          : null;
+      const breakevenTime =
+        currentMetrics.breakeven !== null && pace !== null && pace > 0
+          ? formatBreakevenTime(currentMetrics.breakeven / pace)
+          : "--";
+      lines.push("");
+      lines.push("Break-even calculator:");
+      lines.push(`- Planned units: ${plannedUnits !== null ? formatUnits(plannedUnits) : "--"}`);
+      lines.push(`- Units per week: ${pace !== null ? formatUnits(pace) : "--"}`);
+      lines.push(
+        `- Required avg price: ${priceNeeded !== null ? formatCurrency(priceNeeded) : "--"}`
+      );
+      lines.push(`- Time to breakeven: ${breakevenTime}`);
+    }
+
+    return lines.join("\n");
+  }
+
   function applyGoalData() {
     if (goalValues.goal_revenue) {
       goalValues.goal_revenue.textContent =
@@ -1223,5 +1361,12 @@
   }
   if (setGoalButton) {
     setGoalButton.addEventListener("click", setGoalFromCurrent);
+  }
+
+  if (window.LeZwuenPostItSave) {
+    window.LeZwuenPostItSave.init({
+      root: document.querySelector("[data-postit-save='profit']"),
+      getContent: buildProfitNote
+    });
   }
 })();

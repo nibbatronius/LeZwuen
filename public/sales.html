@@ -116,6 +116,40 @@
             </div>
           </div>
           <div class="sales-list" data-sales-list></div>
+          <section class="postit-save" data-postit-save="sales">
+            <div class="postit-save-header">
+              <div class="panel-title">Save to Post-it</div>
+              <button class="ghost" type="button" data-postit-refresh>Reload</button>
+            </div>
+            <div class="postit-save-row">
+              <label class="sales-field-label" for="sales-postit-folder">Folder</label>
+              <select
+                class="postit-save-select"
+                id="sales-postit-folder"
+                data-postit-folder
+              ></select>
+            </div>
+            <div class="postit-save-inline">
+              <div class="postit-save-row">
+                <label class="sales-field-label" for="sales-postit-new">New folder</label>
+                <input
+                  class="postit-save-input"
+                  id="sales-postit-new"
+                  type="text"
+                  maxlength="32"
+                  placeholder="New folder name"
+                  data-postit-new
+                />
+              </div>
+              <button class="ghost" type="button" data-postit-create>Create</button>
+            </div>
+            <div class="postit-save-actions">
+              <button class="primary" type="button" data-postit-save-button>
+                Save to Post-it
+              </button>
+            </div>
+            <div class="postit-save-status" data-postit-status aria-live="polite"></div>
+          </section>
         </section>
         <section class="sales-panel">
           <div class="sales-panel-header">
@@ -143,6 +177,8 @@
     </main>
     <script src="config.js"></script>
     <script src="shared-data.js"></script>
+    <script src="crypto.js"></script>
+    <script src="post-it-save.js"></script>
     <script src="sales.js"></script>
     <script src="user.js"></script>
   </body>

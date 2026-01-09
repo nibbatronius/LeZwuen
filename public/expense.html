@@ -112,6 +112,40 @@
             </div>
           </div>
           <div class="expense-list" data-expense-list></div>
+          <section class="postit-save" data-postit-save="expense">
+            <div class="postit-save-header">
+              <div class="panel-title">Save to Post-it</div>
+              <button class="ghost" type="button" data-postit-refresh>Reload</button>
+            </div>
+            <div class="postit-save-row">
+              <label class="expense-field-label" for="expense-postit-folder">Folder</label>
+              <select
+                class="postit-save-select"
+                id="expense-postit-folder"
+                data-postit-folder
+              ></select>
+            </div>
+            <div class="postit-save-inline">
+              <div class="postit-save-row">
+                <label class="expense-field-label" for="expense-postit-new">New folder</label>
+                <input
+                  class="postit-save-input"
+                  id="expense-postit-new"
+                  type="text"
+                  maxlength="32"
+                  placeholder="New folder name"
+                  data-postit-new
+                />
+              </div>
+              <button class="ghost" type="button" data-postit-create>Create</button>
+            </div>
+            <div class="postit-save-actions">
+              <button class="primary" type="button" data-postit-save-button>
+                Save to Post-it
+              </button>
+            </div>
+            <div class="postit-save-status" data-postit-status aria-live="polite"></div>
+          </section>
         </section>
         <section class="expense-panel">
           <div class="expense-panel-header">
@@ -148,6 +182,8 @@
     </main>
     <script src="config.js"></script>
     <script src="shared-data.js"></script>
+    <script src="crypto.js"></script>
+    <script src="post-it-save.js"></script>
     <script src="expense.js"></script>
     <script src="user.js"></script>
   </body>

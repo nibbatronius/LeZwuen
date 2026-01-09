@@ -560,6 +560,72 @@ body::after {
   color: #8ff4ca;
 }
 
+.postit-save {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(7, 11, 9, 0.6);
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.postit-save-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.postit-save-row {
+  display: grid;
+  gap: 8px;
+}
+
+.postit-save-inline {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.postit-save-select,
+.postit-save-input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(7, 11, 9, 0.9);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 0.9rem;
+}
+
+.postit-save-select:focus,
+.postit-save-input:focus {
+  outline: 2px solid rgba(140, 247, 196, 0.45);
+  border-color: rgba(140, 247, 196, 0.45);
+  box-shadow: 0 0 0 3px rgba(140, 247, 196, 0.14);
+}
+
+.postit-save-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.postit-save-status {
+  min-height: 18px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.postit-save-status[data-type="error"] {
+  color: #ff9a9a;
+}
+
+.postit-save-status[data-type="success"] {
+  color: #8ff4ca;
+}
+
 .friend-form {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -2307,6 +2373,10 @@ input:focus {
   }
 
   .profit-break-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .postit-save-inline {
     grid-template-columns: 1fr;
   }
 
