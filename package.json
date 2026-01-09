@@ -2,15 +2,45 @@
   "name": "lezwuen-landing",
   "version": "1.0.0",
   "description": "Minimal landing page with auth backend",
-  "main": "server.js",
+  "main": "electron/main.js",
   "type": "commonjs",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "electron": "node electron/run.js",
+    "dist": "electron-builder"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.7.0",
     "cloudinary": "^2.8.0",
     "express": "^4.19.2",
+    "get-port": "^7.0.0",
     "pg": "^8.12.0"
+  },
+  "devDependencies": {
+    "electron": "^30.0.6",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.lezwuen.app",
+    "productName": "LeZwuen",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron/**/*",
+      "public/**/*",
+      "lib/**/*",
+      "server.js",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    }
   }
 }

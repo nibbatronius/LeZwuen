@@ -4,12 +4,15 @@ const crypto = require("crypto");
 const express = require("express");
 const bcrypt = require("bcryptjs");
 const { v2: cloudinary } = require("cloudinary");
-const { Pool } = require("pg");
+const useSqlite = process.env.LEZWUEN_USE_SQLITE === "true";
+const { Pool } = useSqlite ? require("./lib/sqlite-pool") : require("pg");
 
 const app = express();
 
-const databaseUrl = process.env.DATABASE_URL;
-if (!databaseUrl) {
+const databaseUrl = useSqlite
+  ? process.env.LEZWUEN_DB_PATH || path.join(__dirname, "lezwuen.sqlite")
+  : process.env.DATABASE_URL;
+if (!databaseUrl && !useSqlite) {
   console.error("Missing DATABASE_URL environment variable.");
   process.exit(1);
 }
@@ -99,10 +102,12 @@ function decryptRows(rows, fields) {
 }
 
 const useSsl = process.env.DATABASE_SSL === "true" || process.env.NODE_ENV === "production";
-const pool = new Pool({
-  connectionString: databaseUrl,
-  ssl: useSsl ? { rejectUnauthorized: false } : undefined
-});
+const pool = useSqlite
+  ? new Pool({ connectionString: databaseUrl })
+  : new Pool({
+      connectionString: databaseUrl,
+      ssl: useSsl ? { rejectUnauthorized: false } : undefined
+    });
 const DEFAULT_OWNER_DISPLAY_NAME = "NibbaTronius";
 const DEFAULT_FOLDER_NAME = "General";
 const DEFAULT_POST_ITS = [
@@ -335,6 +340,25 @@ if (cloudinaryConfigured) {
       api_secret: process.env.CLOUDINARY_API_SECRET
     });
   }
+}
+
+function getImageExtension(mimeType) {
+  const map = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/jpg": "jpg",
+    "image/webp": "webp",
+    "image/gif": "gif"
+  };
+  return map[mimeType] || "png";
+}
+
+function saveProfileImageLocally(userId, mimeType, buffer) {
+  const ext = getImageExtension(mimeType);
+  const filename = `user-${userId}-${Date.now()}.${ext}`;
+  const target = path.join(uploadDir, filename);
+  fs.writeFileSync(target, buffer);
+  return `/uploads/${filename}`;
 }
 
 const allowedOrigins = (process.env.FRONTEND_ORIGINS || "")
@@ -3161,10 +3185,6 @@ app.post("/api/profile-image", async (req, res) => {
     return res.status(401).json({ error: "Unauthorized." });
   }
 
-  if (!cloudinaryConfigured) {
-    return res.status(500).json({ error: "Cloudinary is not configured." });
-  }
-
   const match = imageData.match(
     /^data:(image\/(png|jpeg|jpg|webp|gif));base64,([A-Za-z0-9+/=]+)$/
   );
@@ -3186,14 +3206,18 @@ app.post("/api/profile-image", async (req, res) => {
       return res.status(401).json({ error: "Unauthorized." });
     }
 
-    const uploadResult = await cloudinary.uploader.upload(imageData, {
-      folder: "lezwuen/avatars",
-      public_id: `user-${user.id}`,
-      overwrite: true,
-      invalidate: true
-    });
-
-    const imageUrl = uploadResult.secure_url || uploadResult.url;
+    let imageUrl = "";
+    if (cloudinaryConfigured) {
+      const uploadResult = await cloudinary.uploader.upload(imageData, {
+        folder: "lezwuen/avatars",
+        public_id: `user-${user.id}`,
+        overwrite: true,
+        invalidate: true
+      });
+      imageUrl = uploadResult.secure_url || uploadResult.url;
+    } else {
+      imageUrl = saveProfileImageLocally(user.id, match[1], buffer);
+    }
     const result = await pool.query(
       "UPDATE users SET profile_image_url = $1 WHERE id = $2 RETURNING id",
       [encryptAtRest(imageUrl), user.id]
@@ -3210,14 +3234,23 @@ app.post("/api/profile-image", async (req, res) => {
   }
 });
 
-initDb()
-  .then(() => {
-    const port = process.env.PORT || 3000;
-    app.listen(port, () => {
+async function startServer() {
+  await initDb();
+  const port = process.env.PORT || 3000;
+  return new Promise((resolve, reject) => {
+    const server = app.listen(port, () => {
       console.log(`Server listening on port ${port}`);
+      resolve(server);
     });
-  })
-  .catch((error) => {
+    server.on("error", reject);
+  });
+}
+
+if (require.main === module) {
+  startServer().catch((error) => {
     console.error("Database initialization failed:", error);
     process.exit(1);
   });
+}
+
+module.exports = { app, startServer };
