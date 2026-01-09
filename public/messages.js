@@ -386,6 +386,43 @@
     return message.body || "";
   }
 
+  async function migrateLegacyMessage(message) {
+    if (!message || message.body_ciphertext || !message.body || !cryptoReady || !currentUserId) {
+      return;
+    }
+
+    const token = getAuthToken();
+    if (!token) {
+      return;
+    }
+
+    const otherUserId =
+      message.sender_id === currentUserId ? message.recipient_id : message.sender_id;
+    const otherPublicKey = friendKeys.get(otherUserId);
+    if (!otherPublicKey) {
+      return;
+    }
+
+    try {
+      const sharedKey = await getConversationKey(otherUserId, otherPublicKey);
+      const encrypted = await window.LeZwuenCrypto.encryptText(message.body, sharedKey);
+      await fetch(apiUrl(`/api/messages/${message.id}/encrypt`), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          bodyCiphertext: encrypted.ciphertext,
+          bodyIv: encrypted.iv,
+          bodyVersion: 1
+        })
+      });
+    } catch (error) {
+      // ignore migration failures
+    }
+  }
+
   async function renderMessages(messages) {
     if (!messagesList) {
       return;
@@ -592,10 +629,18 @@
       }
 
       const messages = Array.isArray(data.messages) ? data.messages : [];
-      if (messages.some((message) => message.body_ciphertext) && !cryptoReady) {
+      if (
+        messages.some((message) => message.body_ciphertext || message.body) &&
+        !cryptoReady
+      ) {
         await ensureCryptoUnlocked(messageStatus);
       }
       await renderMessages(messages);
+      for (const message of messages) {
+        if (message.body && !message.body_ciphertext) {
+          void migrateLegacyMessage(message);
+        }
+      }
     } catch (error) {
       setStatus(messageStatus, "Unable to load messages.", "error");
     }

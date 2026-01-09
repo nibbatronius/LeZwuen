@@ -14,6 +14,90 @@ if (!databaseUrl) {
   process.exit(1);
 }
 
+const dataEncryptionKey = process.env.DATA_ENCRYPTION_KEY;
+if (!dataEncryptionKey) {
+  console.error("Missing DATA_ENCRYPTION_KEY environment variable.");
+  process.exit(1);
+}
+
+const dataKey = Buffer.from(dataEncryptionKey, "base64");
+if (dataKey.length !== 32) {
+  console.error("DATA_ENCRYPTION_KEY must be 32 bytes (base64).");
+  process.exit(1);
+}
+
+const ENCRYPTION_PREFIX = "enc:v1:";
+
+function isEncryptedValue(value) {
+  return typeof value === "string" && value.startsWith(ENCRYPTION_PREFIX);
+}
+
+function encryptAtRest(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const stringValue = String(value);
+  if (isEncryptedValue(stringValue)) {
+    return stringValue;
+  }
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", dataKey, iv);
+  const ciphertext = Buffer.concat([cipher.update(stringValue, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `${ENCRYPTION_PREFIX}${iv.toString("base64")}:${tag.toString("base64")}:${ciphertext.toString(
+    "base64"
+  )}`;
+}
+
+function decryptAtRest(value) {
+  if (!value || typeof value !== "string") {
+    return value;
+  }
+  if (!isEncryptedValue(value)) {
+    return value;
+  }
+  const payload = value.slice(ENCRYPTION_PREFIX.length);
+  const [ivBase64, tagBase64, ciphertextBase64] = payload.split(":");
+  if (!ivBase64 || !tagBase64 || !ciphertextBase64) {
+    return value;
+  }
+  try {
+    const iv = Buffer.from(ivBase64, "base64");
+    const tag = Buffer.from(tagBase64, "base64");
+    const ciphertext = Buffer.from(ciphertextBase64, "base64");
+    const decipher = crypto.createDecipheriv("aes-256-gcm", dataKey, iv);
+    decipher.setAuthTag(tag);
+    const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+    return plaintext.toString("utf8");
+  } catch (error) {
+    return value;
+  }
+}
+
+function hashLookup(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const normalized = String(value).trim().toLowerCase();
+  return crypto.createHmac("sha256", dataKey).update(normalized).digest("hex");
+}
+
+function decryptRow(row, fields) {
+  if (!row) {
+    return row;
+  }
+  fields.forEach((field) => {
+    if (Object.prototype.hasOwnProperty.call(row, field)) {
+      row[field] = decryptAtRest(row[field]);
+    }
+  });
+  return row;
+}
+
+function decryptRows(rows, fields) {
+  return rows.map((row) => decryptRow(row, fields));
+}
+
 const useSsl = process.env.DATABASE_SSL === "true" || process.env.NODE_ENV === "production";
 const pool = new Pool({
   connectionString: databaseUrl,
@@ -48,19 +132,19 @@ async function initDb() {
 
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_image_url TEXT;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name TEXT;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_hash TEXT;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name_hash TEXT;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_adult BOOLEAN DEFAULT FALSE;`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS account_type TEXT DEFAULT 'guest';`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS account_type TEXT;`);
+  await pool.query(`ALTER TABLE users ALTER COLUMN account_type DROP DEFAULT;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS public_key TEXT;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS encrypted_private_key TEXT;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS key_salt TEXT;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS key_iv TEXT;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS key_iterations INTEGER;`);
-  await pool.query(`UPDATE users SET account_type = 'guest' WHERE account_type IS NULL;`);
-  await pool.query(`
-    UPDATE users
-    SET display_name = split_part(email, '@', 1)
-    WHERE display_name IS NULL
-  `);
+  await pool.query("UPDATE users SET account_type = $1 WHERE account_type IS NULL;", [
+    encryptAtRest("guest")
+  ]);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS sessions (
@@ -70,6 +154,7 @@ async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
+  await pool.query(`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS token_hash TEXT;`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS folders (
@@ -107,6 +192,7 @@ async function initDb() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
+  await pool.query(`ALTER TABLE friend_requests ADD COLUMN IF NOT EXISTS status_hash TEXT;`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS messages (
@@ -146,6 +232,13 @@ async function initDb() {
   `);
 
   await pool.query(
+    "CREATE UNIQUE INDEX IF NOT EXISTS users_email_hash_unique ON users(email_hash);"
+  );
+  await pool.query(
+    "CREATE UNIQUE INDEX IF NOT EXISTS sessions_token_hash_unique ON sessions(token_hash);"
+  );
+
+  await pool.query(
     `
       INSERT INTO folders (user_id, name)
       SELECT users.id, $1
@@ -154,7 +247,7 @@ async function initDb() {
         SELECT 1 FROM folders WHERE folders.user_id = users.id
       )
     `,
-    [DEFAULT_FOLDER_NAME]
+    [encryptAtRest(DEFAULT_FOLDER_NAME)]
   );
 
   await pool.query(`
@@ -170,6 +263,7 @@ async function initDb() {
       AND post_its.folder_id IS NULL
   `);
 
+  await migrateEncryptedData();
   await syncOwnerAccount();
   await ensureOwnerPostIts();
 }
@@ -244,9 +338,11 @@ async function createSession(userId) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const token = crypto.randomBytes(24).toString("hex");
     try {
-      await pool.query("INSERT INTO sessions (user_id, token) VALUES ($1, $2)", [
+      const tokenHash = hashLookup(token);
+      await pool.query("INSERT INTO sessions (user_id, token, token_hash) VALUES ($1, $2, $3)", [
         userId,
-        token
+        encryptAtRest(token),
+        tokenHash
       ]);
       return token;
     } catch (error) {
@@ -260,6 +356,7 @@ async function createSession(userId) {
 }
 
 async function getUserFromToken(token) {
+  const tokenHash = hashLookup(token);
   const result = await pool.query(
     `
       SELECT users.id,
@@ -275,11 +372,25 @@ async function getUserFromToken(token) {
              users.key_iterations
       FROM sessions
       JOIN users ON users.id = sessions.user_id
-      WHERE sessions.token = $1
+      WHERE sessions.token_hash = $1
     `,
-    [token]
+    [tokenHash]
   );
-  return result.rows[0];
+  const user = result.rows[0];
+  if (!user) {
+    return null;
+  }
+  decryptRow(user, [
+    "email",
+    "display_name",
+    "profile_image_url",
+    "account_type",
+    "public_key",
+    "encrypted_private_key",
+    "key_salt",
+    "key_iv"
+  ]);
+  return user;
 }
 
 function getOwnerDisplayName() {
@@ -291,9 +402,10 @@ async function getOwnerId(ownerDisplayName) {
     return null;
   }
 
+  const displayNameHash = hashLookup(ownerDisplayName);
   const result = await pool.query(
-    "SELECT id FROM users WHERE LOWER(display_name) = LOWER($1) ORDER BY id ASC LIMIT 1",
-    [ownerDisplayName]
+    "SELECT id FROM users WHERE display_name_hash = $1 ORDER BY id ASC LIMIT 1",
+    [displayNameHash]
   );
 
   if (!result.rows.length) {
@@ -314,7 +426,7 @@ async function ensureDefaultFolderForUser(userId) {
 
   const created = await pool.query(
     "INSERT INTO folders (user_id, name) VALUES ($1, $2) RETURNING id",
-    [userId, DEFAULT_FOLDER_NAME]
+    [userId, encryptAtRest(DEFAULT_FOLDER_NAME)]
   );
   return created.rows[0].id;
 }
@@ -335,6 +447,7 @@ async function getFolderAccess(userId, folderId) {
   }
 
   const folder = folderResult.rows[0];
+  decryptRow(folder, ["name", "owner_display_name"]);
   if (folder.user_id === userId) {
     return { folder, canEdit: true };
   }
@@ -352,11 +465,12 @@ async function getFolderAccess(userId, folderId) {
 }
 
 async function areFriends(userId, otherUserId) {
+  const acceptedHash = hashLookup("accepted");
   const result = await pool.query(
     `
       SELECT id
       FROM friend_requests
-      WHERE status = 'accepted'
+      WHERE status_hash = $3
         AND (
           (requester_id = $1 AND recipient_id = $2)
           OR
@@ -364,7 +478,7 @@ async function areFriends(userId, otherUserId) {
         )
       LIMIT 1
     `,
-    [userId, otherUserId]
+    [userId, otherUserId, acceptedHash]
   );
   return result.rows.length > 0;
 }
@@ -381,10 +495,13 @@ async function syncOwnerAccount() {
     return;
   }
 
-  await pool.query("UPDATE users SET account_type = 'guest' WHERE account_type = 'owner' AND id <> $1", [
+  const guestValue = encryptAtRest("guest");
+  const ownerValue = encryptAtRest("owner");
+  await pool.query("UPDATE users SET account_type = $1 WHERE id <> $2", [
+    guestValue,
     ownerId
   ]);
-  await pool.query("UPDATE users SET account_type = 'owner' WHERE id = $1", [ownerId]);
+  await pool.query("UPDATE users SET account_type = $1 WHERE id = $2", [ownerValue, ownerId]);
 }
 
 async function ensureOwnerPostIts() {
@@ -410,7 +527,8 @@ async function ensureOwnerPostIts() {
     return;
   }
 
-  const values = [ownerId, folderId, ...DEFAULT_POST_ITS.map((note) => note.body)];
+  const encryptedBodies = DEFAULT_POST_ITS.map((note) => encryptAtRest(note.body));
+  const values = [ownerId, folderId, ...encryptedBodies];
   const placeholders = DEFAULT_POST_ITS.map(
     (_, index) => `($1, $2, $${index + 3})`
   ).join(", ");
@@ -418,6 +536,308 @@ async function ensureOwnerPostIts() {
     `INSERT INTO post_its (user_id, folder_id, body) VALUES ${placeholders}`,
     values
   );
+}
+
+async function migrateEncryptedData() {
+  await migrateUsers();
+  await migrateSessions();
+  await migrateFriendRequests();
+  await migrateFolders();
+  await migratePostIts();
+  await migrateMessages();
+  await migrateFolderKeys();
+}
+
+async function migrateUsers() {
+  const result = await pool.query(
+    `
+      SELECT id,
+             email,
+             email_hash,
+             display_name,
+             display_name_hash,
+             password_hash,
+             profile_image_url,
+             account_type,
+             public_key,
+             encrypted_private_key,
+             key_salt,
+             key_iv
+      FROM users
+    `
+  );
+
+  for (const row of result.rows) {
+    const updates = [];
+    const values = [];
+    let index = 1;
+
+    const emailPlain = row.email ? decryptAtRest(row.email) : null;
+    let displayNamePlain = row.display_name ? decryptAtRest(row.display_name) : null;
+    if (!displayNamePlain && emailPlain && emailPlain.includes("@")) {
+      displayNamePlain = emailPlain.split("@")[0];
+    }
+
+    if (row.email !== null && row.email !== undefined && !isEncryptedValue(row.email)) {
+      updates.push(`email = $${index}`);
+      values.push(encryptAtRest(emailPlain || row.email));
+      index += 1;
+    }
+
+    if (emailPlain) {
+      const emailHash = hashLookup(emailPlain);
+      if (row.email_hash !== emailHash) {
+        updates.push(`email_hash = $${index}`);
+        values.push(emailHash);
+        index += 1;
+      }
+    }
+
+    if (displayNamePlain) {
+      if (!row.display_name || !isEncryptedValue(row.display_name)) {
+        updates.push(`display_name = $${index}`);
+        values.push(encryptAtRest(displayNamePlain));
+        index += 1;
+      }
+      const displayHash = hashLookup(displayNamePlain);
+      if (row.display_name_hash !== displayHash) {
+        updates.push(`display_name_hash = $${index}`);
+        values.push(displayHash);
+        index += 1;
+      }
+    }
+
+    if (row.password_hash && !isEncryptedValue(row.password_hash)) {
+      updates.push(`password_hash = $${index}`);
+      values.push(encryptAtRest(row.password_hash));
+      index += 1;
+    }
+
+    if (row.profile_image_url && !isEncryptedValue(row.profile_image_url)) {
+      updates.push(`profile_image_url = $${index}`);
+      values.push(encryptAtRest(row.profile_image_url));
+      index += 1;
+    }
+
+    const accountTypePlain = row.account_type
+      ? decryptAtRest(row.account_type)
+      : "guest";
+    if (!row.account_type || !isEncryptedValue(row.account_type)) {
+      updates.push(`account_type = $${index}`);
+      values.push(encryptAtRest(accountTypePlain));
+      index += 1;
+    }
+
+    if (row.public_key && !isEncryptedValue(row.public_key)) {
+      updates.push(`public_key = $${index}`);
+      values.push(encryptAtRest(row.public_key));
+      index += 1;
+    }
+
+    if (row.encrypted_private_key && !isEncryptedValue(row.encrypted_private_key)) {
+      updates.push(`encrypted_private_key = $${index}`);
+      values.push(encryptAtRest(row.encrypted_private_key));
+      index += 1;
+    }
+
+    if (row.key_salt && !isEncryptedValue(row.key_salt)) {
+      updates.push(`key_salt = $${index}`);
+      values.push(encryptAtRest(row.key_salt));
+      index += 1;
+    }
+
+    if (row.key_iv && !isEncryptedValue(row.key_iv)) {
+      updates.push(`key_iv = $${index}`);
+      values.push(encryptAtRest(row.key_iv));
+      index += 1;
+    }
+
+    if (updates.length) {
+      values.push(row.id);
+      await pool.query(
+        `UPDATE users SET ${updates.join(", ")} WHERE id = $${index}`,
+        values
+      );
+    }
+  }
+}
+
+async function migrateSessions() {
+  const result = await pool.query("SELECT id, token, token_hash FROM sessions");
+
+  for (const row of result.rows) {
+    const updates = [];
+    const values = [];
+    let index = 1;
+
+    const tokenPlain = row.token ? decryptAtRest(row.token) : null;
+    if (row.token && !isEncryptedValue(row.token)) {
+      updates.push(`token = $${index}`);
+      values.push(encryptAtRest(tokenPlain || row.token));
+      index += 1;
+    }
+
+    if (tokenPlain) {
+      const tokenHash = hashLookup(tokenPlain);
+      if (row.token_hash !== tokenHash) {
+        updates.push(`token_hash = $${index}`);
+        values.push(tokenHash);
+        index += 1;
+      }
+    }
+
+    if (updates.length) {
+      values.push(row.id);
+      await pool.query(`UPDATE sessions SET ${updates.join(", ")} WHERE id = $${index}`, values);
+    }
+  }
+}
+
+async function migrateFriendRequests() {
+  const result = await pool.query("SELECT id, status, status_hash FROM friend_requests");
+
+  for (const row of result.rows) {
+    const updates = [];
+    const values = [];
+    let index = 1;
+
+    const statusPlain = row.status ? decryptAtRest(row.status) : "pending";
+    if (!row.status || !isEncryptedValue(row.status)) {
+      updates.push(`status = $${index}`);
+      values.push(encryptAtRest(statusPlain));
+      index += 1;
+    }
+
+    const statusHash = hashLookup(statusPlain);
+    if (row.status_hash !== statusHash) {
+      updates.push(`status_hash = $${index}`);
+      values.push(statusHash);
+      index += 1;
+    }
+
+    if (updates.length) {
+      values.push(row.id);
+      await pool.query(
+        `UPDATE friend_requests SET ${updates.join(", ")} WHERE id = $${index}`,
+        values
+      );
+    }
+  }
+}
+
+async function migrateFolders() {
+  const result = await pool.query("SELECT id, name FROM folders");
+
+  for (const row of result.rows) {
+    if (!isEncryptedValue(row.name)) {
+      await pool.query("UPDATE folders SET name = $1 WHERE id = $2", [
+        encryptAtRest(row.name),
+        row.id
+      ]);
+    }
+  }
+}
+
+async function migratePostIts() {
+  const result = await pool.query("SELECT id, body, body_ciphertext, body_iv FROM post_its");
+
+  for (const row of result.rows) {
+    const updates = [];
+    const values = [];
+    let index = 1;
+
+    if (row.body !== null && !isEncryptedValue(row.body)) {
+      updates.push(`body = $${index}`);
+      values.push(encryptAtRest(row.body));
+      index += 1;
+    }
+
+    if (row.body_ciphertext && !isEncryptedValue(row.body_ciphertext)) {
+      updates.push(`body_ciphertext = $${index}`);
+      values.push(encryptAtRest(row.body_ciphertext));
+      index += 1;
+    }
+
+    if (row.body_iv && !isEncryptedValue(row.body_iv)) {
+      updates.push(`body_iv = $${index}`);
+      values.push(encryptAtRest(row.body_iv));
+      index += 1;
+    }
+
+    if (updates.length) {
+      values.push(row.id);
+      await pool.query(
+        `UPDATE post_its SET ${updates.join(", ")} WHERE id = $${index}`,
+        values
+      );
+    }
+  }
+}
+
+async function migrateMessages() {
+  const result = await pool.query("SELECT id, body, body_ciphertext, body_iv FROM messages");
+
+  for (const row of result.rows) {
+    const updates = [];
+    const values = [];
+    let index = 1;
+
+    if (row.body !== null && !isEncryptedValue(row.body)) {
+      updates.push(`body = $${index}`);
+      values.push(encryptAtRest(row.body));
+      index += 1;
+    }
+
+    if (row.body_ciphertext && !isEncryptedValue(row.body_ciphertext)) {
+      updates.push(`body_ciphertext = $${index}`);
+      values.push(encryptAtRest(row.body_ciphertext));
+      index += 1;
+    }
+
+    if (row.body_iv && !isEncryptedValue(row.body_iv)) {
+      updates.push(`body_iv = $${index}`);
+      values.push(encryptAtRest(row.body_iv));
+      index += 1;
+    }
+
+    if (updates.length) {
+      values.push(row.id);
+      await pool.query(
+        `UPDATE messages SET ${updates.join(", ")} WHERE id = $${index}`,
+        values
+      );
+    }
+  }
+}
+
+async function migrateFolderKeys() {
+  const result = await pool.query("SELECT id, enc_key, enc_iv FROM folder_keys");
+
+  for (const row of result.rows) {
+    const updates = [];
+    const values = [];
+    let index = 1;
+
+    if (row.enc_key && !isEncryptedValue(row.enc_key)) {
+      updates.push(`enc_key = $${index}`);
+      values.push(encryptAtRest(row.enc_key));
+      index += 1;
+    }
+
+    if (row.enc_iv && !isEncryptedValue(row.enc_iv)) {
+      updates.push(`enc_iv = $${index}`);
+      values.push(encryptAtRest(row.enc_iv));
+      index += 1;
+    }
+
+    if (updates.length) {
+      values.push(row.id);
+      await pool.query(
+        `UPDATE folder_keys SET ${updates.join(", ")} WHERE id = $${index}`,
+        values
+      );
+    }
+  }
 }
 
 app.get("/healthz", (req, res) => {
@@ -450,19 +870,25 @@ app.post("/api/signup", async (req, res) => {
 
   try {
     const passwordHash = await bcrypt.hash(password, 10);
+    const emailHash = hashLookup(email);
+    const displayNameHash = hashLookup(displayName);
+    const encryptedPasswordHash = encryptAtRest(passwordHash);
     const result = await pool.query(
       `
         INSERT INTO users (
           email,
           password_hash,
           display_name,
+          email_hash,
+          display_name_hash,
           public_key,
           encrypted_private_key,
           key_salt,
           key_iv,
-          key_iterations
+          key_iterations,
+          account_type
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         RETURNING id,
                   email,
                   display_name,
@@ -474,17 +900,29 @@ app.post("/api/signup", async (req, res) => {
                   key_iterations
       `,
       [
-        email,
-        passwordHash,
-        displayName,
-        publicKey,
-        encryptedPrivateKey,
-        keySalt,
-        keyIv,
-        keyIterations
+        encryptAtRest(email),
+        encryptedPasswordHash,
+        encryptAtRest(displayName),
+        emailHash,
+        displayNameHash,
+        publicKey ? encryptAtRest(publicKey) : null,
+        encryptedPrivateKey ? encryptAtRest(encryptedPrivateKey) : null,
+        keySalt ? encryptAtRest(keySalt) : null,
+        keyIv ? encryptAtRest(keyIv) : null,
+        keyIterations,
+        encryptAtRest("guest")
       ]
     );
 
+    decryptRow(result.rows[0], [
+      "email",
+      "display_name",
+      "account_type",
+      "public_key",
+      "encrypted_private_key",
+      "key_salt",
+      "key_iv"
+    ]);
     await ensureDefaultFolderForUser(result.rows[0].id);
     const token = await createSession(result.rows[0].id);
 
@@ -513,6 +951,7 @@ app.post("/api/login", async (req, res) => {
   }
 
   try {
+    const emailHash = hashLookup(email);
     const result = await pool.query(
       `SELECT id,
               email,
@@ -525,8 +964,8 @@ app.post("/api/login", async (req, res) => {
               key_iv,
               key_iterations
        FROM users
-       WHERE email = $1`,
-      [email]
+       WHERE email_hash = $1`,
+      [emailHash]
     );
 
     if (!result.rows.length) {
@@ -534,6 +973,16 @@ app.post("/api/login", async (req, res) => {
     }
 
     const user = result.rows[0];
+    decryptRow(user, [
+      "email",
+      "display_name",
+      "password_hash",
+      "account_type",
+      "public_key",
+      "encrypted_private_key",
+      "key_salt",
+      "key_iv"
+    ]);
     const match = await bcrypt.compare(password, user.password_hash);
 
     if (!match) {
@@ -581,7 +1030,9 @@ app.get("/api/users/:id", async (req, res) => {
       return res.status(404).json({ error: "User not found." });
     }
 
-    return res.json({ ok: true, user: result.rows[0] });
+    const user = result.rows[0];
+    decryptRow(user, ["email", "display_name", "profile_image_url", "account_type"]);
+    return res.json({ ok: true, user });
   } catch (error) {
     console.error("User lookup failed:", error);
     return res.status(500).json({ error: "Unable to load profile." });
@@ -650,10 +1101,19 @@ app.post("/api/e2ee/bootstrap", async (req, res) => {
                   key_iv,
                   key_iterations
       `,
-      [publicKey, encryptedPrivateKey, keySalt, keyIv, keyIterations, user.id]
+      [
+        encryptAtRest(publicKey),
+        encryptAtRest(encryptedPrivateKey),
+        encryptAtRest(keySalt),
+        encryptAtRest(keyIv),
+        keyIterations,
+        user.id
+      ]
     );
 
-    return res.json({ ok: true, keys: result.rows[0] });
+    const keys = result.rows[0];
+    decryptRow(keys, ["public_key", "encrypted_private_key", "key_salt", "key_iv"]);
+    return res.json({ ok: true, keys });
   } catch (error) {
     console.error("E2EE bootstrap failed:", error);
     return res.status(500).json({ error: "Unable to save encryption keys." });
@@ -690,7 +1150,10 @@ app.patch("/api/profile", async (req, res) => {
         return res.status(400).json({ error: "Display name must be 2-32 characters." });
       }
       updates.push(`display_name = $${index}`);
-      values.push(displayName);
+      values.push(encryptAtRest(displayName));
+      index += 1;
+      updates.push(`display_name_hash = $${index}`);
+      values.push(hashLookup(displayName));
       index += 1;
     }
 
@@ -700,7 +1163,10 @@ app.patch("/api/profile", async (req, res) => {
         return res.status(400).json({ error: "Please enter a valid email." });
       }
       updates.push(`email = $${index}`);
-      values.push(email);
+      values.push(encryptAtRest(email));
+      index += 1;
+      updates.push(`email_hash = $${index}`);
+      values.push(hashLookup(email));
       index += 1;
     }
 
@@ -719,7 +1185,9 @@ app.patch("/api/profile", async (req, res) => {
       values
     );
 
-    return res.json({ ok: true, user: result.rows[0] });
+    const user = result.rows[0];
+    decryptRow(user, ["email", "display_name", "profile_image_url", "account_type"]);
+    return res.json({ ok: true, user });
   } catch (error) {
     if (error.code === "23505") {
       return res.status(409).json({ error: "Email is already registered." });
@@ -784,10 +1252,18 @@ app.get("/api/folders", async (req, res) => {
       [user.id]
     );
 
+    const own = decryptRows(ownFolders.rows, ["name", "encrypted_key", "key_iv"]);
+    const shared = decryptRows(sharedFolders.rows, [
+      "name",
+      "owner_display_name",
+      "owner_public_key",
+      "encrypted_key",
+      "key_iv"
+    ]);
     return res.json({
       ok: true,
-      folders: ownFolders.rows,
-      sharedFolders: sharedFolders.rows
+      folders: own,
+      sharedFolders: shared
     });
   } catch (error) {
     console.error("Folder lookup failed:", error);
@@ -824,10 +1300,12 @@ app.post("/api/folders", async (req, res) => {
         VALUES ($1, $2)
         RETURNING id, name, created_at, updated_at
       `,
-      [user.id, nameInput]
+      [user.id, encryptAtRest(nameInput)]
     );
 
-    return res.status(201).json({ ok: true, folder: result.rows[0] });
+    const folder = result.rows[0];
+    decryptRow(folder, ["name"]);
+    return res.status(201).json({ ok: true, folder });
   } catch (error) {
     console.error("Folder create failed:", error);
     return res.status(500).json({ error: "Unable to create folder." });
@@ -869,14 +1347,16 @@ app.patch("/api/folders/:id", async (req, res) => {
         WHERE id = $2 AND user_id = $3
         RETURNING id, name, created_at, updated_at
       `,
-      [nameInput, folderId, user.id]
+      [encryptAtRest(nameInput), folderId, user.id]
     );
 
     if (!result.rows.length) {
       return res.status(404).json({ error: "Folder not found." });
     }
 
-    return res.json({ ok: true, folder: result.rows[0] });
+    const folder = result.rows[0];
+    decryptRow(folder, ["name"]);
+    return res.json({ ok: true, folder });
   } catch (error) {
     console.error("Folder update failed:", error);
     return res.status(500).json({ error: "Unable to update folder." });
@@ -925,10 +1405,12 @@ app.post("/api/folders/:id/key", async (req, res) => {
                       key_version = EXCLUDED.key_version
         RETURNING folder_id, user_id, enc_key, enc_iv, key_version
       `,
-      [folderId, user.id, encryptedKey, keyIv, keyVersion]
+      [folderId, user.id, encryptAtRest(encryptedKey), encryptAtRest(keyIv), keyVersion]
     );
 
-    return res.json({ ok: true, key: result.rows[0] });
+    const keyRow = result.rows[0];
+    decryptRow(keyRow, ["enc_key", "enc_iv"]);
+    return res.json({ ok: true, key: keyRow });
   } catch (error) {
     console.error("Folder key save failed:", error);
     return res.status(500).json({ error: "Unable to save folder key." });
@@ -1010,9 +1492,10 @@ app.get("/api/folders/:id/post-its", async (req, res) => {
       [folderId]
     );
 
+    const postIts = decryptRows(result.rows, ["body", "body_ciphertext", "body_iv"]);
     return res.json({
       ok: true,
-      postIts: result.rows,
+      postIts,
       canEdit: access.canEdit,
       folder: access.folder
     });
@@ -1062,9 +1545,10 @@ app.get("/api/post-its", async (req, res) => {
       [folderId]
     );
 
+    const postIts = decryptRows(result.rows, ["body", "body_ciphertext", "body_iv"]);
     return res.json({
       ok: true,
-      postIts: result.rows,
+      postIts,
       canEdit: access.canEdit,
       folder: access.folder
     });
@@ -1083,6 +1567,7 @@ app.post("/api/post-its", async (req, res) => {
   const bodyVersion = Number.isInteger(bodyVersionInput) ? bodyVersionInput : 1;
   const isEncrypted = Boolean(bodyCiphertext && bodyIv);
   const bodyInput = !isEncrypted && typeof req.body.body === "string" ? req.body.body.trim() : "";
+  const bodyValue = isEncrypted ? "" : bodyInput;
   const folderId = Number.parseInt(req.body.folderId, 10);
 
   if (!token) {
@@ -1093,8 +1578,8 @@ app.post("/api/post-its", async (req, res) => {
     return res.status(400).json({ error: "Folder id is required." });
   }
 
-  if (!isEncrypted && !bodyInput) {
-    return res.status(400).json({ error: "Note cannot be empty." });
+  if (!isEncrypted) {
+    return res.status(400).json({ error: "Note must be encrypted." });
   }
 
   if (!isEncrypted && bodyInput.length > 4000) {
@@ -1119,6 +1604,9 @@ app.post("/api/post-its", async (req, res) => {
       return res.status(404).json({ error: "Folder not found." });
     }
 
+    const storedBody = encryptAtRest(bodyValue);
+    const storedCiphertext = bodyCiphertext ? encryptAtRest(bodyCiphertext) : null;
+    const storedIv = bodyIv ? encryptAtRest(bodyIv) : null;
     const result = await pool.query(
       `
         INSERT INTO post_its (user_id, folder_id, body, body_ciphertext, body_iv, body_version)
@@ -1131,10 +1619,12 @@ app.post("/api/post-its", async (req, res) => {
                   created_at,
                   updated_at
       `,
-      [user.id, folderId, bodyInput || "", bodyCiphertext || null, bodyIv || null, bodyVersion]
+      [user.id, folderId, storedBody, storedCiphertext, storedIv, bodyVersion]
     );
 
-    return res.status(201).json({ ok: true, postIt: result.rows[0] });
+    const postIt = result.rows[0];
+    decryptRow(postIt, ["body", "body_ciphertext", "body_iv"]);
+    return res.status(201).json({ ok: true, postIt });
   } catch (error) {
     console.error("Post-it create failed:", error);
     return res.status(500).json({ error: "Unable to save note." });
@@ -1151,6 +1641,7 @@ app.patch("/api/post-its/:id", async (req, res) => {
   const bodyVersion = Number.isInteger(bodyVersionInput) ? bodyVersionInput : 1;
   const isEncrypted = Boolean(bodyCiphertext && bodyIv);
   const bodyInput = !isEncrypted && typeof req.body.body === "string" ? req.body.body.trim() : "";
+  const bodyValue = isEncrypted ? "" : bodyInput;
 
   if (!token) {
     return res.status(401).json({ error: "Unauthorized." });
@@ -1160,8 +1651,8 @@ app.patch("/api/post-its/:id", async (req, res) => {
     return res.status(400).json({ error: "Invalid note id." });
   }
 
-  if (!isEncrypted && !bodyInput) {
-    return res.status(400).json({ error: "Note cannot be empty." });
+  if (!isEncrypted) {
+    return res.status(400).json({ error: "Note must be encrypted." });
   }
 
   if (!isEncrypted && bodyInput.length > 4000) {
@@ -1181,6 +1672,9 @@ app.patch("/api/post-its/:id", async (req, res) => {
       return res.status(401).json({ error: "Unauthorized." });
     }
 
+    const storedBody = encryptAtRest(bodyValue);
+    const storedCiphertext = bodyCiphertext ? encryptAtRest(bodyCiphertext) : null;
+    const storedIv = bodyIv ? encryptAtRest(bodyIv) : null;
     const result = await pool.query(
       `
         UPDATE post_its
@@ -1198,14 +1692,16 @@ app.patch("/api/post-its/:id", async (req, res) => {
                   created_at,
                   updated_at
       `,
-      [bodyInput || "", bodyCiphertext || null, bodyIv || null, bodyVersion, postItId, user.id]
+      [storedBody, storedCiphertext, storedIv, bodyVersion, postItId, user.id]
     );
 
     if (!result.rows.length) {
       return res.status(404).json({ error: "Note not found." });
     }
 
-    return res.json({ ok: true, postIt: result.rows[0] });
+    const postIt = result.rows[0];
+    decryptRow(postIt, ["body", "body_ciphertext", "body_iv"]);
+    return res.json({ ok: true, postIt });
   } catch (error) {
     console.error("Post-it update failed:", error);
     return res.status(500).json({ error: "Unable to save note." });
@@ -1261,6 +1757,7 @@ app.get("/api/friend-requests", async (req, res) => {
       return res.status(401).json({ error: "Unauthorized." });
     }
 
+    const pendingHash = hashLookup("pending");
     const incoming = await pool.query(
       `
         SELECT friend_requests.id,
@@ -1270,10 +1767,10 @@ app.get("/api/friend-requests", async (req, res) => {
         FROM friend_requests
         JOIN users ON users.id = friend_requests.requester_id
         WHERE friend_requests.recipient_id = $1
-          AND friend_requests.status = 'pending'
+          AND friend_requests.status_hash = $2
         ORDER BY friend_requests.created_at ASC
       `,
-      [user.id]
+      [user.id, pendingHash]
     );
 
     const outgoing = await pool.query(
@@ -1285,13 +1782,15 @@ app.get("/api/friend-requests", async (req, res) => {
         FROM friend_requests
         JOIN users ON users.id = friend_requests.recipient_id
         WHERE friend_requests.requester_id = $1
-          AND friend_requests.status = 'pending'
+          AND friend_requests.status_hash = $2
         ORDER BY friend_requests.created_at ASC
       `,
-      [user.id]
+      [user.id, pendingHash]
     );
 
-    return res.json({ ok: true, incoming: incoming.rows, outgoing: outgoing.rows });
+    const incomingRows = decryptRows(incoming.rows, ["display_name", "email"]);
+    const outgoingRows = decryptRows(outgoing.rows, ["display_name", "email"]);
+    return res.json({ ok: true, incoming: incomingRows, outgoing: outgoingRows });
   } catch (error) {
     console.error("Friend request lookup failed:", error);
     return res.status(500).json({ error: "Unable to load friend requests." });
@@ -1318,8 +1817,8 @@ app.post("/api/friend-requests", async (req, res) => {
     }
 
     const targetResult = await pool.query(
-      "SELECT id, display_name, email FROM users WHERE LOWER(email) = LOWER($1)",
-      [emailInput]
+      "SELECT id, display_name, email FROM users WHERE email_hash = $1",
+      [hashLookup(emailInput)]
     );
 
     if (!targetResult.rows.length) {
@@ -1333,7 +1832,7 @@ app.post("/api/friend-requests", async (req, res) => {
 
     const existing = await pool.query(
       `
-        SELECT id, requester_id, recipient_id, status
+        SELECT id, requester_id, recipient_id, status, status_hash
         FROM friend_requests
         WHERE (requester_id = $1 AND recipient_id = $2)
            OR (requester_id = $2 AND recipient_id = $1)
@@ -1344,10 +1843,14 @@ app.post("/api/friend-requests", async (req, res) => {
 
     if (existing.rows.length) {
       const request = existing.rows[0];
-      if (request.status === "accepted") {
+      const acceptedHash = hashLookup("accepted");
+      const pendingHash = hashLookup("pending");
+      const statusHash =
+        request.status_hash || hashLookup(decryptAtRest(request.status || ""));
+      if (statusHash === acceptedHash) {
         return res.status(409).json({ error: "You are already friends." });
       }
-      if (request.status === "pending") {
+      if (statusHash === pendingHash) {
         if (request.requester_id === user.id) {
           return res.status(409).json({ error: "Friend request already sent." });
         }
@@ -1358,10 +1861,20 @@ app.post("/api/friend-requests", async (req, res) => {
       await pool.query(
         `
           UPDATE friend_requests
-          SET requester_id = $1, recipient_id = $2, status = 'pending', updated_at = NOW()
-          WHERE id = $3
+          SET requester_id = $1,
+              recipient_id = $2,
+              status = $3,
+              status_hash = $4,
+              updated_at = NOW()
+          WHERE id = $5
         `,
-        [user.id, targetUser.id, request.id]
+        [
+          user.id,
+          targetUser.id,
+          encryptAtRest("pending"),
+          hashLookup("pending"),
+          request.id
+        ]
       );
 
       return res.status(201).json({
@@ -1369,19 +1882,19 @@ app.post("/api/friend-requests", async (req, res) => {
         request: {
           id: request.id,
           recipient_id: targetUser.id,
-          display_name: targetUser.display_name,
-          email: targetUser.email
+          display_name: decryptAtRest(targetUser.display_name),
+          email: decryptAtRest(targetUser.email)
         }
       });
     }
 
     const result = await pool.query(
       `
-        INSERT INTO friend_requests (requester_id, recipient_id)
-        VALUES ($1, $2)
+        INSERT INTO friend_requests (requester_id, recipient_id, status, status_hash)
+        VALUES ($1, $2, $3, $4)
         RETURNING id
       `,
-      [user.id, targetUser.id]
+      [user.id, targetUser.id, encryptAtRest("pending"), hashLookup("pending")]
     );
 
     return res.status(201).json({
@@ -1389,8 +1902,8 @@ app.post("/api/friend-requests", async (req, res) => {
       request: {
         id: result.rows[0].id,
         recipient_id: targetUser.id,
-        display_name: targetUser.display_name,
-        email: targetUser.email
+        display_name: decryptAtRest(targetUser.display_name),
+        email: decryptAtRest(targetUser.email)
       }
     });
   } catch (error) {
@@ -1418,14 +1931,23 @@ app.post("/api/friend-requests/:id/accept", async (req, res) => {
       return res.status(401).json({ error: "Unauthorized." });
     }
 
+    const pendingHash = hashLookup("pending");
     const result = await pool.query(
       `
         UPDATE friend_requests
-        SET status = 'accepted', updated_at = NOW()
-        WHERE id = $1 AND recipient_id = $2 AND status = 'pending'
+        SET status = $3,
+            status_hash = $4,
+            updated_at = NOW()
+        WHERE id = $1 AND recipient_id = $2 AND status_hash = $5
         RETURNING id, requester_id
       `,
-      [requestId, user.id]
+      [
+        requestId,
+        user.id,
+        encryptAtRest("accepted"),
+        hashLookup("accepted"),
+        pendingHash
+      ]
     );
 
     if (!result.rows.length) {
@@ -1458,14 +1980,23 @@ app.post("/api/friend-requests/:id/decline", async (req, res) => {
       return res.status(401).json({ error: "Unauthorized." });
     }
 
+    const pendingHash = hashLookup("pending");
     const result = await pool.query(
       `
         UPDATE friend_requests
-        SET status = 'declined', updated_at = NOW()
-        WHERE id = $1 AND recipient_id = $2 AND status = 'pending'
+        SET status = $3,
+            status_hash = $4,
+            updated_at = NOW()
+        WHERE id = $1 AND recipient_id = $2 AND status_hash = $5
         RETURNING id
       `,
-      [requestId, user.id]
+      [
+        requestId,
+        user.id,
+        encryptAtRest("declined"),
+        hashLookup("declined"),
+        pendingHash
+      ]
     );
 
     if (!result.rows.length) {
@@ -1493,6 +2024,7 @@ app.get("/api/friends", async (req, res) => {
       return res.status(401).json({ error: "Unauthorized." });
     }
 
+    const acceptedHash = hashLookup("accepted");
     const result = await pool.query(
       `
         SELECT
@@ -1507,14 +2039,24 @@ app.get("/api/friends", async (req, res) => {
             WHEN friend_requests.requester_id = $1 THEN friend_requests.recipient_id
             ELSE friend_requests.requester_id
           END
-        WHERE friend_requests.status = 'accepted'
+        WHERE friend_requests.status_hash = $2
           AND (friend_requests.requester_id = $1 OR friend_requests.recipient_id = $1)
-        ORDER BY users.display_name ASC
+        ORDER BY users.id ASC
       `,
-      [user.id]
+      [user.id, acceptedHash]
     );
 
-    return res.json({ ok: true, friends: result.rows });
+    const friends = decryptRows(result.rows, [
+      "display_name",
+      "email",
+      "profile_image_url",
+      "public_key"
+    ]).sort((a, b) => {
+      const nameA = (a.display_name || a.email || "").toLowerCase();
+      const nameB = (b.display_name || b.email || "").toLowerCase();
+      return nameA.localeCompare(nameB);
+    });
+    return res.json({ ok: true, friends });
   } catch (error) {
     console.error("Friend list lookup failed:", error);
     return res.status(500).json({ error: "Unable to load friends." });
@@ -1567,10 +2109,78 @@ app.get("/api/messages/:userId", async (req, res) => {
       [user.id, otherUserId]
     );
 
-    return res.json({ ok: true, messages: result.rows });
+    const messages = decryptRows(result.rows, [
+      "body",
+      "body_ciphertext",
+      "body_iv",
+      "share_folder_name"
+    ]);
+    return res.json({ ok: true, messages });
   } catch (error) {
     console.error("Message lookup failed:", error);
     return res.status(500).json({ error: "Unable to load messages." });
+  }
+});
+
+app.post("/api/messages/:id/encrypt", async (req, res) => {
+  const token = getTokenFromRequest(req);
+  const messageId = Number.parseInt(req.params.id, 10);
+  const bodyCiphertext =
+    typeof req.body.bodyCiphertext === "string" ? req.body.bodyCiphertext.trim() : "";
+  const bodyIv = typeof req.body.bodyIv === "string" ? req.body.bodyIv.trim() : "";
+  const bodyVersionInput = Number.parseInt(req.body.bodyVersion, 10);
+  const bodyVersion = Number.isInteger(bodyVersionInput) ? bodyVersionInput : 1;
+
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+
+  if (!Number.isInteger(messageId)) {
+    return res.status(400).json({ error: "Invalid message id." });
+  }
+
+  if (!bodyCiphertext || !bodyIv) {
+    return res.status(400).json({ error: "Encrypted message is required." });
+  }
+
+  if (bodyCiphertext.length > 16000 || bodyIv.length > 128) {
+    return res.status(400).json({ error: "Message is too long." });
+  }
+
+  try {
+    const user = await getUserFromToken(token);
+
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized." });
+    }
+
+    const storedCiphertext = encryptAtRest(bodyCiphertext);
+    const storedIv = encryptAtRest(bodyIv);
+    const result = await pool.query(
+      `
+        UPDATE messages
+        SET body = '',
+            body_ciphertext = $1,
+            body_iv = $2,
+            body_version = $3
+        WHERE id = $4
+          AND body_ciphertext IS NULL
+          AND (sender_id = $5 OR recipient_id = $5)
+        RETURNING id, body_ciphertext, body_iv, body_version
+      `,
+      [storedCiphertext, storedIv, bodyVersion, messageId, user.id]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: "Message not found or already encrypted." });
+    }
+
+    const message = result.rows[0];
+    decryptRow(message, ["body_ciphertext", "body_iv"]);
+    return res.json({ ok: true, message });
+  } catch (error) {
+    console.error("Message encrypt failed:", error);
+    return res.status(500).json({ error: "Unable to encrypt message." });
   }
 });
 
@@ -1583,6 +2193,7 @@ app.post("/api/messages", async (req, res) => {
   const bodyVersion = Number.isInteger(bodyVersionInput) ? bodyVersionInput : 1;
   const isEncrypted = Boolean(bodyCiphertext && bodyIv);
   const bodyInput = !isEncrypted && typeof req.body.body === "string" ? req.body.body.trim() : "";
+  const bodyValue = isEncrypted ? "" : bodyInput;
   const recipientId = Number.parseInt(req.body.recipientId, 10);
   const shareFolderId = Number.parseInt(req.body.shareFolderId, 10);
   const shareFolderKey =
@@ -1602,8 +2213,12 @@ app.post("/api/messages", async (req, res) => {
     return res.status(400).json({ error: "Recipient is required." });
   }
 
-  if (!bodyInput && !isEncrypted && !Number.isInteger(shareFolderId)) {
+  if (!bodyValue && !isEncrypted && !Number.isInteger(shareFolderId)) {
     return res.status(400).json({ error: "Message cannot be empty." });
+  }
+
+  if (!isEncrypted && bodyInput) {
+    return res.status(400).json({ error: "Message must be encrypted." });
   }
 
   if (!isEncrypted && bodyInput.length > 4000) {
@@ -1643,7 +2258,7 @@ app.post("/api/messages", async (req, res) => {
       }
 
       shareFolderValue = folderResult.rows[0].id;
-      shareFolderName = folderResult.rows[0].name;
+      shareFolderName = decryptAtRest(folderResult.rows[0].name);
 
       await pool.query(
         `
@@ -1664,11 +2279,20 @@ app.post("/api/messages", async (req, res) => {
                           enc_iv = EXCLUDED.enc_iv,
                           key_version = EXCLUDED.key_version
           `,
-          [shareFolderId, recipientId, shareFolderKey, shareFolderKeyIv, shareFolderKeyVersion]
+          [
+            shareFolderId,
+            recipientId,
+            encryptAtRest(shareFolderKey),
+            encryptAtRest(shareFolderKeyIv),
+            shareFolderKeyVersion
+          ]
         );
       }
     }
 
+    const storedBody = encryptAtRest(bodyValue);
+    const storedCiphertext = bodyCiphertext ? encryptAtRest(bodyCiphertext) : null;
+    const storedIv = bodyIv ? encryptAtRest(bodyIv) : null;
     const result = await pool.query(
       `
         INSERT INTO messages (
@@ -1694,18 +2318,21 @@ app.post("/api/messages", async (req, res) => {
       [
         user.id,
         recipientId,
-        bodyInput || "",
-        bodyCiphertext || null,
-        bodyIv || null,
+        storedBody,
+        storedCiphertext,
+        storedIv,
         bodyVersion,
         shareFolderValue
       ]
     );
 
+    const message = result.rows[0];
+    decryptRow(message, ["body", "body_ciphertext", "body_iv"]);
+
     return res.status(201).json({
       ok: true,
       message: {
-        ...result.rows[0],
+        ...message,
         share_folder_name: shareFolderName
       }
     });
@@ -1780,7 +2407,7 @@ app.post("/api/profile-image", async (req, res) => {
     const imageUrl = uploadResult.secure_url || uploadResult.url;
     const result = await pool.query(
       "UPDATE users SET profile_image_url = $1 WHERE id = $2 RETURNING id",
-      [imageUrl, user.id]
+      [encryptAtRest(imageUrl), user.id]
     );
 
     if (!result.rows.length) {

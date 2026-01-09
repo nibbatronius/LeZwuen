@@ -388,6 +388,43 @@
     return String(postIt.body || "");
   }
 
+  async function migrateLegacyPostIt(postIt, folderId) {
+    if (!postIt || postIt.body_ciphertext || !postIt.body) {
+      return;
+    }
+    if (!cryptoReady || !window.LeZwuenCrypto) {
+      return;
+    }
+
+    const token = getAuthToken();
+    if (!token) {
+      return;
+    }
+
+    try {
+      const folderKey = await getFolderAesKey(folderId);
+      if (!folderKey) {
+        return;
+      }
+      const encrypted = await window.LeZwuenCrypto.encryptText(postIt.body, folderKey);
+      await fetch(apiUrl(`/api/post-its/${postIt.id}`), {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          body: "",
+          bodyCiphertext: encrypted.ciphertext,
+          bodyIv: encrypted.iv,
+          bodyVersion: 1
+        })
+      });
+    } catch (error) {
+      // ignore migration failures
+    }
+  }
+
   function clearPostIts() {
     if (!grid) {
       return;
@@ -657,11 +694,14 @@
 
       const notes = Array.isArray(data.postIts) ? data.postIts : [];
       const canEdit = Boolean(data.canEdit);
-      if (notes.some((note) => note.body_ciphertext) && !cryptoReady) {
+      if (notes.some((note) => note.body_ciphertext || note.body) && !cryptoReady) {
         await ensureCryptoUnlocked(composeStatus);
       }
       for (const note of notes) {
         await appendPostIt(note, canEdit, folderId);
+        if (note.body && !note.body_ciphertext) {
+          void migrateLegacyPostIt(note, folderId);
+        }
       }
       updateEmptyState();
     } catch (error) {
