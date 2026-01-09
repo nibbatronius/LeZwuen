@@ -596,9 +596,17 @@ body::after {
   gap: 12px;
 }
 
-.profit-header-copy {
+.profit-summary-header {
   display: grid;
   gap: 2px;
+}
+
+.profit-dashboard-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .profit-title {
@@ -869,6 +877,18 @@ body::after {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  flex-wrap: wrap;
+}
+
+.profit-goal-heading {
+  display: grid;
+  gap: 2px;
+}
+
+.profit-goal-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .profit-goal-grid {

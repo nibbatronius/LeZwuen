@@ -9,11 +9,9 @@
   const addProductButton = document.querySelector("[data-add-product]");
   const productsBody = document.querySelector("[data-products]");
   const goalProductsBody = document.querySelector("[data-goal-products]");
-  const dashboardToggle = document.querySelector("[data-dashboard-toggle]");
+  const dashboardToggles = Array.from(document.querySelectorAll("[data-dashboard-toggle]"));
   const summaryDashboard = document.querySelector("[data-dashboard='summary']");
   const goalDashboard = document.querySelector("[data-dashboard='goal']");
-  const dashboardHeaders = Array.from(document.querySelectorAll("[data-dashboard-header]"));
-  const dashboardActions = Array.from(document.querySelectorAll("[data-dashboard-actions]"));
   const saveButton = document.querySelector("[data-save]");
   const loadButton = document.querySelector("[data-load]");
   const loadInput = document.querySelector("[data-load-input]");
@@ -307,17 +305,10 @@
     if (goalDashboard) {
       goalDashboard.hidden = view !== "goal";
     }
-    if (dashboardToggle) {
-      dashboardToggle.textContent = view === "summary" ? "View Goals" : "View Summary";
-    }
-    if (dashboardHeaders.length) {
-      dashboardHeaders.forEach((header) => {
-        header.hidden = header.dataset.dashboardHeader !== view;
-      });
-    }
-    if (dashboardActions.length) {
-      dashboardActions.forEach((actions) => {
-        actions.hidden = actions.dataset.dashboardActions !== view;
+    if (dashboardToggles.length) {
+      const nextLabel = view === "summary" ? "View Goals" : "View Summary";
+      dashboardToggles.forEach((button) => {
+        button.textContent = nextLabel;
       });
     }
   }
@@ -756,9 +747,11 @@
   if (addProductButton) {
     addProductButton.addEventListener("click", () => addProductRow());
   }
-  if (dashboardToggle) {
-    dashboardToggle.addEventListener("click", () => {
-      setDashboard(activeDashboard === "summary" ? "goal" : "summary");
+  if (dashboardToggles.length) {
+    dashboardToggles.forEach((button) => {
+      button.addEventListener("click", () => {
+        setDashboard(activeDashboard === "summary" ? "goal" : "summary");
+      });
     });
   }
   if (saveButton) {

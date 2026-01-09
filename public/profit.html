@@ -95,23 +95,19 @@
           <div class="profit-tip">Tip: Add multiple products to build total revenue automatically.</div>
         </section>
         <section class="profit-panel profit-panel-summary">
-          <div class="profit-panel-header">
-            <div class="profit-header-copy" data-dashboard-header="summary">
-              <div class="profit-title">Summary</div>
-              <div class="profit-subtitle">Revenue, margin, breakeven, and more.</div>
-            </div>
-            <div class="profit-header-copy" data-dashboard-header="goal" hidden>
-              <div class="profit-title">Goals</div>
-              <div class="profit-subtitle">Set targets and track sales progress.</div>
-            </div>
-            <button class="ghost" type="button" data-dashboard-toggle>View Goals</button>
-          </div>
-          <div class="profit-actions" data-dashboard-actions="summary">
-            <button class="primary" type="button" data-save>Save JSON</button>
-            <button class="ghost" type="button" data-load>Load JSON</button>
-            <input type="file" accept="application/json" data-load-input hidden />
-          </div>
           <div class="profit-dashboard" data-dashboard="summary">
+            <div class="profit-dashboard-header">
+              <div class="profit-summary-header">
+                <div class="profit-title">Summary</div>
+                <div class="profit-subtitle">Revenue, margin, breakeven, and more.</div>
+              </div>
+              <button class="ghost" type="button" data-dashboard-toggle>View Goals</button>
+            </div>
+            <div class="profit-actions">
+              <button class="primary" type="button" data-save>Save JSON</button>
+              <button class="ghost" type="button" data-load>Load JSON</button>
+              <input type="file" accept="application/json" data-load-input hidden />
+            </div>
             <div class="profit-metrics">
               <div class="profit-metric">
                 <div class="profit-metric-label">Total revenue</div>
@@ -152,8 +148,14 @@
           </div>
           <div class="profit-dashboard" data-dashboard="goal" hidden>
             <div class="profit-goal-header">
-              <div class="panel-title">Goal dashboard</div>
-              <button class="primary" type="button" data-set-goal>Set current as goal</button>
+              <div class="profit-goal-heading">
+                <div class="panel-title">Goal dashboard</div>
+                <div class="profit-subtitle">Set targets and track sales progress.</div>
+              </div>
+              <div class="profit-goal-actions">
+                <button class="primary" type="button" data-set-goal>Set current as goal</button>
+                <button class="ghost" type="button" data-dashboard-toggle>View Summary</button>
+              </div>
             </div>
             <div class="profit-goal-grid">
               <div class="profit-highlight-card">
