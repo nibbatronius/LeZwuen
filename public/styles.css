@@ -570,6 +570,7 @@ body::after {
 .app-layout-profit {
   place-items: start;
   align-content: start;
+  width: min(1200px, 100%);
 }
 
 .profit-shell {
