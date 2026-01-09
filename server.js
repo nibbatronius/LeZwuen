@@ -108,7 +108,7 @@ const pool = useSqlite
       connectionString: databaseUrl,
       ssl: useSsl ? { rejectUnauthorized: false } : undefined
     });
-const DEFAULT_OWNER_DISPLAY_NAME = "NibbaTronius";
+const DEFAULT_OWNER_DISPLAY_NAME = "LeZwuen";
 const DEFAULT_FOLDER_NAME = "General";
 const DEFAULT_POST_ITS = [
   {
