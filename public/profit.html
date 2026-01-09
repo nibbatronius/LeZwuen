@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+    />
+    <title>LeZwuen | Profit Calculator</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="app-body">
+    <header class="site-header">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-text">LeZwuen</span>
+      </div>
+      <nav class="site-nav">
+        <a class="nav-link" href="home.html">Home</a>
+        <a class="nav-link" href="messages.html">Messages</a>
+      </nav>
+      <div class="profile-slot">
+        <a class="avatar-link" href="profile.html" aria-label="Go to profile">
+          <img
+            class="avatar"
+            src="avatar-placeholder.svg"
+            alt="Profile avatar"
+            data-avatar-img
+          />
+        </a>
+        <label class="avatar-edit" aria-label="Upload profile photo">
+          <input class="avatar-input" type="file" accept="image/*" data-avatar-input />
+          <span aria-hidden="true">+</span>
+        </label>
+        <span class="upload-status" data-upload-status aria-live="polite"></span>
+      </div>
+    </header>
+    <main class="app-layout app-layout-profit" data-owner-gate>
+      <section class="profit-shell" data-owner-only hidden>
+        <section class="profit-panel profit-panel-input">
+          <div class="profit-panel-header">
+            <div>
+              <div class="profit-title">Profit calculator</div>
+              <div class="profit-subtitle">Track revenue, costs, and margins with clarity.</div>
+            </div>
+            <button class="ghost" type="button" data-reset>Reset</button>
+          </div>
+          <div class="profit-field">
+            <label class="profit-field-label" for="profit-currency">Currency</label>
+            <select class="profit-select" id="profit-currency" data-currency></select>
+          </div>
+          <div class="profit-fields">
+            <div class="profit-field">
+              <label class="profit-field-label" for="profit-cogs">Cost of goods</label>
+              <div class="profit-money-field">
+                <span class="profit-currency-prefix" data-currency-prefix>USD</span>
+                <input
+                  id="profit-cogs"
+                  type="text"
+                  inputmode="decimal"
+                  placeholder="0.00"
+                  data-input="cogs"
+                />
+              </div>
+            </div>
+            <div class="profit-field">
+              <label class="profit-field-label" for="profit-overhead">Operating costs</label>
+              <div class="profit-money-field">
+                <span class="profit-currency-prefix" data-currency-prefix>USD</span>
+                <input
+                  id="profit-overhead"
+                  type="text"
+                  inputmode="decimal"
+                  placeholder="0.00"
+                  data-input="overhead"
+                />
+              </div>
+            </div>
+          </div>
+          <div class="profit-section">
+            <div class="profit-section-header">
+              <div class="panel-title">Products</div>
+              <button class="ghost" type="button" data-add-product>Add product</button>
+            </div>
+            <div class="profit-table profit-table-products">
+              <div class="profit-table-head">
+                <span>Product</span>
+                <span>Units</span>
+                <span>Price per unit</span>
+                <span></span>
+              </div>
+              <div class="profit-table-body" data-products></div>
+            </div>
+          </div>
+          <div class="profit-tip">Tip: Add multiple products to build total revenue automatically.</div>
+        </section>
+        <section class="profit-panel profit-panel-summary">
+          <div class="profit-panel-header">
+            <div>
+              <div class="profit-title">Summary</div>
+              <div class="profit-subtitle">Revenue, margin, breakeven, and more.</div>
+            </div>
+            <button class="ghost" type="button" data-dashboard-toggle>View Goals</button>
+          </div>
+          <div class="profit-actions">
+            <button class="primary" type="button" data-save>Save JSON</button>
+            <button class="ghost" type="button" data-load>Load JSON</button>
+            <input type="file" accept="application/json" data-load-input hidden />
+          </div>
+          <div class="profit-dashboard" data-dashboard="summary">
+            <div class="profit-metrics">
+              <div class="profit-metric">
+                <div class="profit-metric-label">Total revenue</div>
+                <div class="profit-metric-value" data-output="revenue">--</div>
+                <div class="profit-metric-tag" data-output-tag="revenue">Products required</div>
+              </div>
+              <div class="profit-metric">
+                <div class="profit-metric-label">Net profit</div>
+                <div class="profit-metric-value" data-output="profit">--</div>
+                <div class="profit-metric-tag" data-output-tag="profit">Waiting for inputs</div>
+              </div>
+              <div class="profit-metric">
+                <div class="profit-metric-header">
+                  <div class="profit-metric-label">Gross margin</div>
+                  <span class="profit-badge" data-margin-badge>Margin</span>
+                </div>
+                <div class="profit-metric-value" data-output="margin">--</div>
+                <div class="profit-metric-tag" data-output-tag="margin">Waiting for inputs</div>
+              </div>
+              <div class="profit-metric">
+                <div class="profit-metric-label">Breakeven units</div>
+                <div class="profit-metric-value" data-output="breakeven">--</div>
+                <div class="profit-metric-tag" data-output-tag="breakeven">
+                  Price &amp; costs required
+                </div>
+              </div>
+            </div>
+            <div class="profit-highlight-grid">
+              <div class="profit-highlight-card">
+                <div class="profit-highlight-label">Avg price per unit</div>
+                <div class="profit-highlight-value" data-output="rev_unit">--</div>
+              </div>
+              <div class="profit-highlight-card">
+                <div class="profit-highlight-label">Cost ratio</div>
+                <div class="profit-highlight-value" data-output="cost_ratio">--</div>
+              </div>
+            </div>
+          </div>
+          <div class="profit-dashboard" data-dashboard="goal" hidden>
+            <div class="profit-goal-header">
+              <div class="panel-title">Goal dashboard</div>
+              <button class="primary" type="button" data-set-goal>Set current as goal</button>
+            </div>
+            <div class="profit-goal-grid">
+              <div class="profit-highlight-card">
+                <div class="profit-highlight-label">Revenue goal</div>
+                <div class="profit-highlight-value" data-goal="goal_revenue">--</div>
+              </div>
+              <div class="profit-highlight-card">
+                <div class="profit-highlight-label">Profit goal</div>
+                <div class="profit-highlight-value" data-goal="goal_profit">--</div>
+              </div>
+              <div class="profit-highlight-card">
+                <div class="profit-highlight-label">Margin goal</div>
+                <div class="profit-highlight-value" data-goal="goal_margin">--</div>
+              </div>
+            </div>
+            <div class="profit-goal-row">
+              <span class="profit-goal-label">Breakeven target</span>
+              <span class="profit-goal-value" data-goal="goal_breakeven">--</span>
+            </div>
+            <div class="profit-meter">
+              <div class="profit-meter-title">Sales progress</div>
+              <div class="profit-meter-label">Goal completion</div>
+              <div class="profit-meter-bar">
+                <span class="profit-meter-fill" data-goal-meter></span>
+              </div>
+              <div class="profit-meter-value" data-goal="goal_percent">--</div>
+            </div>
+            <div class="profit-metrics">
+              <div class="profit-metric">
+                <div class="profit-metric-label">Revenue achieved</div>
+                <div class="profit-metric-value" data-goal="sold_revenue">--</div>
+                <div class="profit-metric-tag" data-goal-tag="sold_revenue_tag">
+                  Set a goal to track progress
+                </div>
+              </div>
+              <div class="profit-metric">
+                <div class="profit-metric-label">Units sold</div>
+                <div class="profit-metric-value" data-goal="sold_units">--</div>
+                <div class="profit-metric-tag" data-goal-tag="sold_units_tag">Waiting for sales</div>
+              </div>
+              <div class="profit-metric">
+                <div class="profit-metric-label">Units remaining</div>
+                <div class="profit-metric-value" data-goal="remaining_units">--</div>
+                <div class="profit-metric-tag" data-goal-tag="remaining_units_tag"></div>
+              </div>
+            </div>
+            <div class="profit-table profit-table-goals">
+              <div class="profit-table-head">
+                <span>Product</span>
+                <span>Planned</span>
+                <span>Sold units</span>
+                <span>Sold total</span>
+                <span>Remaining</span>
+              </div>
+              <div class="profit-table-body" data-goal-products></div>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+    <script src="config.js"></script>
+    <script src="owner-tools.js"></script>
+    <script src="profit.js"></script>
+    <script src="user.js"></script>
+  </body>
+</html>

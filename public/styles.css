@@ -330,6 +330,7 @@ body::after {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .folder-view-title {
@@ -340,6 +341,20 @@ body::after {
 .folder-view-meta {
   font-size: 0.85rem;
   color: var(--muted);
+}
+
+.folder-view-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.owner-tool-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  white-space: nowrap;
 }
 
 .messages-shell {
@@ -546,6 +561,371 @@ body::after {
 .message-actions {
   display: flex;
   justify-content: flex-end;
+}
+
+.app-layout-profit {
+  place-items: start;
+  align-content: start;
+}
+
+.profit-shell {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.profit-panel {
+  background: rgba(7, 11, 9, 0.65);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 22px;
+  display: grid;
+  gap: 16px;
+}
+
+.profit-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.profit-title {
+  font-size: 1rem;
+  letter-spacing: 0.04em;
+}
+
+.profit-subtitle {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.profit-field {
+  display: grid;
+  gap: 8px;
+}
+
+.profit-field-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--muted);
+}
+
+.profit-fields {
+  display: grid;
+  gap: 12px;
+}
+
+.profit-select {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(7, 11, 9, 0.9);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 0.95rem;
+}
+
+.profit-select:focus {
+  outline: 2px solid rgba(140, 247, 196, 0.45);
+  border-color: rgba(140, 247, 196, 0.45);
+  box-shadow: 0 0 0 3px rgba(140, 247, 196, 0.14);
+}
+
+.profit-money-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(7, 11, 9, 0.9);
+}
+
+.profit-money-field input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  padding: 12px 0;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 0.95rem;
+}
+
+.profit-money-field input:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.profit-money-field:focus-within {
+  outline: 2px solid rgba(140, 247, 196, 0.45);
+  border-color: rgba(140, 247, 196, 0.45);
+  box-shadow: 0 0 0 3px rgba(140, 247, 196, 0.14);
+}
+
+.profit-money-field.compact {
+  padding: 0 10px;
+}
+
+.profit-money-field.compact input {
+  padding: 10px 0;
+  font-size: 0.9rem;
+}
+
+.profit-currency-prefix {
+  font-size: 0.8rem;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+}
+
+.profit-section {
+  display: grid;
+  gap: 10px;
+}
+
+.profit-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.profit-table {
+  display: grid;
+  gap: 10px;
+}
+
+.profit-table-head,
+.profit-table-row {
+  display: grid;
+  gap: 10px;
+  align-items: center;
+}
+
+.profit-table-products .profit-table-head,
+.profit-table-products .profit-table-row {
+  grid-template-columns: minmax(120px, 1fr) minmax(90px, 1fr) minmax(120px, 1fr) auto;
+}
+
+.profit-table-goals .profit-table-head,
+.profit-table-goals .profit-table-row {
+  grid-template-columns:
+    minmax(120px, 1fr)
+    minmax(80px, 1fr)
+    minmax(90px, 1fr)
+    minmax(120px, 1fr)
+    minmax(90px, 1fr);
+}
+
+.profit-table-head {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--muted);
+}
+
+.profit-table-body {
+  display: grid;
+  gap: 10px;
+}
+
+.profit-row-label,
+.profit-row-value {
+  font-size: 0.9rem;
+  color: var(--ink);
+}
+
+.profit-compact-input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(7, 11, 9, 0.9);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 0.9rem;
+}
+
+.profit-tip {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.profit-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.profit-dashboard {
+  display: grid;
+  gap: 16px;
+}
+
+.profit-metrics {
+  display: grid;
+  gap: 12px;
+}
+
+.profit-metric {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(7, 11, 9, 0.6);
+  padding: 12px 14px;
+  display: grid;
+  gap: 6px;
+}
+
+.profit-metric-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.profit-metric-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--muted);
+}
+
+.profit-metric-value {
+  font-size: 1.1rem;
+  color: var(--ink);
+}
+
+.profit-metric-tag {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.profit-metric-tag[data-type="positive"] {
+  color: #8ff4ca;
+}
+
+.profit-metric-tag[data-type="warning"] {
+  color: #f5c067;
+}
+
+.profit-metric-tag[data-type="negative"] {
+  color: #ff9a9a;
+}
+
+.profit-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  background: rgba(7, 11, 9, 0.7);
+}
+
+.profit-highlight-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.profit-highlight-card {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(7, 11, 9, 0.6);
+  padding: 12px 14px;
+  display: grid;
+  gap: 6px;
+}
+
+.profit-highlight-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+}
+
+.profit-highlight-value {
+  font-size: 1.05rem;
+  color: var(--ink);
+}
+
+.profit-goal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.profit-goal-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.profit-goal-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.9rem;
+  color: var(--ink);
+}
+
+.profit-goal-label {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 0.75rem;
+}
+
+.profit-meter {
+  display: grid;
+  gap: 8px;
+}
+
+.profit-meter-title {
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+
+.profit-meter-label {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.profit-meter-bar {
+  height: 12px;
+  border-radius: 999px;
+  background: rgba(7, 11, 9, 0.6);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.profit-meter-fill {
+  display: block;
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  transition: width 0.2s ease;
+}
+
+.profit-meter-value {
+  font-size: 0.85rem;
+  color: var(--muted);
+  text-align: right;
+}
+
+.profit-remove {
+  padding: 8px 10px;
+  font-size: 0.75rem;
 }
 
 .post-it-grid {
@@ -1029,12 +1409,18 @@ input:focus {
   }
 
   .post-it-shell,
-  .messages-shell {
+  .messages-shell,
+  .profit-shell {
     grid-template-columns: 1fr;
   }
 
   .messages-list {
     max-height: none;
+  }
+
+  .profit-goal-grid,
+  .profit-highlight-grid {
+    grid-template-columns: 1fr;
   }
 
 }
@@ -1073,6 +1459,10 @@ input:focus {
 
   .card {
     padding: 24px;
+  }
+
+  .profit-actions {
+    grid-template-columns: 1fr;
   }
 
 }
