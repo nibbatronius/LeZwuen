@@ -6,7 +6,7 @@ if (process.env.ELECTRON_RUN_AS_NODE === "1") {
   delete process.env.ELECTRON_RUN_AS_NODE;
 }
 const electron = require("electron");
-const { app, BrowserWindow } = electron;
+const { app, BrowserWindow, ipcMain } = electron;
 let getPort;
 let startServer;
 
@@ -54,9 +54,14 @@ async function createWindow() {
     minWidth: 960,
     minHeight: 700,
     title: "LeZwuen",
+    frame: false,
+    transparent: true,
+    hasShadow: true,
+    titleBarStyle: "hidden",
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      preload: path.join(__dirname, "preload.js"),
       sandbox: false
     }
   });
@@ -81,5 +86,30 @@ app.on("activate", () => {
 app.on("before-quit", () => {
   if (serverInstance && typeof serverInstance.close === "function") {
     serverInstance.close();
+  }
+});
+
+ipcMain.handle("window:minimize", (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win) {
+    win.minimize();
+  }
+});
+
+ipcMain.handle("window:maximize", (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win) {
+    if (win.isMaximized()) {
+      win.unmaximize();
+    } else {
+      win.maximize();
+    }
+  }
+});
+
+ipcMain.handle("window:close", (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win) {
+    win.close();
   }
 });
