@@ -395,6 +395,9 @@ loadProfile();
 
 if (logoutButton) {
   logoutButton.addEventListener("click", () => {
+    if (window.LeZwuenCrypto) {
+      window.LeZwuenCrypto.lockNow();
+    }
     localStorage.removeItem("lezwuenAuthToken");
     localStorage.removeItem("lezwuenUser");
     window.location.href = "/index.html";

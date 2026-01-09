@@ -21,6 +21,8 @@
   let privateKey = null;
   let publicKey = null;
   const friendKeys = new Map();
+  let unlockInProgress = false;
+  let ownShareFolders = [];
 
   function apiUrl(path) {
     if (!apiBaseUrl) {
@@ -31,6 +33,57 @@
 
   function getAuthToken() {
     return localStorage.getItem("lezwuenAuthToken");
+  }
+
+  function getStoredUserKeys() {
+    const raw = localStorage.getItem("lezwuenUser");
+    if (!raw) {
+      return null;
+    }
+
+    try {
+      const user = JSON.parse(raw);
+      if (
+        !user ||
+        !user.public_key ||
+        !user.encrypted_private_key ||
+        !user.key_salt ||
+        !user.key_iv
+      ) {
+        return null;
+      }
+      return {
+        publicKey: user.public_key,
+        encryptedPrivateKey: user.encrypted_private_key,
+        keySalt: user.key_salt,
+        keyIv: user.key_iv,
+        keyIterations: user.key_iterations
+      };
+    } catch (error) {
+      return null;
+    }
+  }
+
+  async function refreshStoredUser() {
+    const token = getAuthToken();
+    if (!token) {
+      return null;
+    }
+
+    try {
+      const response = await fetch(apiUrl("/api/me"), {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && data.user) {
+        localStorage.setItem("lezwuenUser", JSON.stringify(data.user));
+        return data.user;
+      }
+    } catch (error) {
+      return null;
+    }
+
+    return null;
   }
 
   function conversationInfo(userId, otherUserId) {
@@ -49,10 +102,49 @@
       return false;
     }
 
+    window.LeZwuenCrypto.startAutoLock();
     privateKey = await window.LeZwuenCrypto.getPrivateKey();
     publicKey = await window.LeZwuenCrypto.getPublicKey();
     cryptoReady = Boolean(privateKey && publicKey);
     return cryptoReady;
+  }
+
+  async function ensureCryptoUnlocked(statusTarget) {
+    await initCrypto();
+    if (cryptoReady) {
+      return true;
+    }
+
+    if (!window.LeZwuenCrypto || unlockInProgress) {
+      return false;
+    }
+
+    let payload = getStoredUserKeys();
+    if (!payload) {
+      await refreshStoredUser();
+      payload = getStoredUserKeys();
+    }
+    if (!payload) {
+      return false;
+    }
+
+    unlockInProgress = true;
+    const password = window.prompt("Enter your password to unlock encrypted messages.");
+    unlockInProgress = false;
+    if (!password) {
+      return false;
+    }
+
+    try {
+      await window.LeZwuenCrypto.unlockUserKeys(payload, password);
+      await initCrypto();
+      return cryptoReady;
+    } catch (error) {
+      if (statusTarget) {
+        setStatus(statusTarget, "Unable to unlock encryption.", "error");
+      }
+      return false;
+    }
   }
 
   async function getConversationKey(otherUserId, otherPublicKey) {
@@ -333,7 +425,7 @@
         button.className = "message-share-button";
         button.textContent = "Open";
         button.addEventListener("click", () => {
-          window.location.href = `/home.html?shared=${message.share_folder_id}`;
+          window.location.href = `/notes.html?shared=${message.share_folder_id}`;
         });
 
         share.append(label, button);
@@ -436,6 +528,7 @@
       }
 
       const own = Array.isArray(data.folders) ? data.folders : [];
+      ownShareFolders = own;
       if (cryptoReady) {
         await Promise.all(own.map((folder) => ensureFolderKey(folder)));
       }
@@ -494,7 +587,11 @@
         return;
       }
 
-      await renderMessages(Array.isArray(data.messages) ? data.messages : []);
+      const messages = Array.isArray(data.messages) ? data.messages : [];
+      if (messages.some((message) => message.body_ciphertext) && !cryptoReady) {
+        await ensureCryptoUnlocked(messageStatus);
+      }
+      await renderMessages(messages);
     } catch (error) {
       setStatus(messageStatus, "Unable to load messages.", "error");
     }
@@ -597,8 +694,11 @@
       }
 
       if (!cryptoReady || !currentUserId) {
-        setStatus(messageStatus, "Re-login to unlock encryption.", "error");
-        return;
+        const unlocked = await ensureCryptoUnlocked(messageStatus);
+        if (!unlocked || !currentUserId) {
+          setStatus(messageStatus, "Unlock encryption to send messages.", "error");
+          return;
+        }
       }
 
       setStatus(messageStatus, "Sending...");
@@ -628,7 +728,16 @@
             setStatus(messageStatus, "Recipient encryption key missing.", "error");
             return;
           }
-          const folderKeyBase64 = window.LeZwuenCrypto.getFolderKey(shareFolderId);
+          let folderKeyBase64 = window.LeZwuenCrypto.getFolderKey(shareFolderId);
+          if (!folderKeyBase64) {
+            const targetFolder = ownShareFolders.find(
+              (folder) => String(folder.id) === String(shareFolderId)
+            );
+            if (targetFolder) {
+              await ensureFolderKey(targetFolder);
+              folderKeyBase64 = window.LeZwuenCrypto.getFolderKey(shareFolderId);
+            }
+          }
           if (!folderKeyBase64) {
             setStatus(messageStatus, "Open the folder once before sharing it.", "error");
             return;
@@ -677,6 +786,12 @@
   }
 
   loadCurrentUser();
+  window.addEventListener("lezwuen-lock", () => {
+    cryptoReady = false;
+    privateKey = null;
+    publicKey = null;
+    setStatus(messageStatus, "Session locked. Unlock to continue.", "error");
+  });
   initCrypto();
   setMessagingEnabled(false);
   loadFriendRequests();

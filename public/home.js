@@ -28,12 +28,64 @@
   let cryptoReady = false;
   let privateKey = null;
   let publicKey = null;
+  let unlockInProgress = false;
 
   function apiUrl(path) {
     if (!apiBaseUrl) {
       return path;
     }
     return new URL(path, apiBaseUrl).toString();
+  }
+
+  function getStoredUserKeys() {
+    const raw = localStorage.getItem("lezwuenUser");
+    if (!raw) {
+      return null;
+    }
+
+    try {
+      const user = JSON.parse(raw);
+      if (
+        !user ||
+        !user.public_key ||
+        !user.encrypted_private_key ||
+        !user.key_salt ||
+        !user.key_iv
+      ) {
+        return null;
+      }
+      return {
+        publicKey: user.public_key,
+        encryptedPrivateKey: user.encrypted_private_key,
+        keySalt: user.key_salt,
+        keyIv: user.key_iv,
+        keyIterations: user.key_iterations
+      };
+    } catch (error) {
+      return null;
+    }
+  }
+
+  async function refreshStoredUser() {
+    const token = getAuthToken();
+    if (!token) {
+      return null;
+    }
+
+    try {
+      const response = await fetch(apiUrl("/api/me"), {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && data.user) {
+        localStorage.setItem("lezwuenUser", JSON.stringify(data.user));
+        return data.user;
+      }
+    } catch (error) {
+      return null;
+    }
+
+    return null;
   }
 
   function getAuthToken() {
@@ -65,10 +117,49 @@
       return false;
     }
 
+    window.LeZwuenCrypto.startAutoLock();
     privateKey = await window.LeZwuenCrypto.getPrivateKey();
     publicKey = await window.LeZwuenCrypto.getPublicKey();
     cryptoReady = Boolean(privateKey && publicKey);
     return cryptoReady;
+  }
+
+  async function ensureCryptoUnlocked(statusTarget) {
+    await initCrypto();
+    if (cryptoReady) {
+      return true;
+    }
+
+    if (!window.LeZwuenCrypto || unlockInProgress) {
+      return false;
+    }
+
+    let payload = getStoredUserKeys();
+    if (!payload) {
+      await refreshStoredUser();
+      payload = getStoredUserKeys();
+    }
+    if (!payload) {
+      return false;
+    }
+
+    unlockInProgress = true;
+    const password = window.prompt("Enter your password to unlock encrypted notes.");
+    unlockInProgress = false;
+    if (!password) {
+      return false;
+    }
+
+    try {
+      await window.LeZwuenCrypto.unlockUserKeys(payload, password);
+      await initCrypto();
+      return cryptoReady;
+    } catch (error) {
+      if (statusTarget) {
+        setStatus(statusTarget, "Unable to unlock encryption.", "error");
+      }
+      return false;
+    }
   }
 
   async function getFolderAesKey(folderId) {
@@ -78,10 +169,21 @@
 
     const storedKey = window.LeZwuenCrypto.getFolderKey(folderId);
     if (!storedKey) {
+      const folder =
+        selectedFolderType === "shared"
+          ? sharedFolders.find((item) => item.id === folderId)
+          : folders.find((item) => item.id === folderId);
+      if (folder) {
+        await ensureFolderKey(folder, selectedFolderType === "shared");
+      }
+    }
+
+    const finalKey = window.LeZwuenCrypto.getFolderKey(folderId);
+    if (!finalKey) {
       return null;
     }
 
-    return window.LeZwuenCrypto.importAesKey(storedKey);
+    return window.LeZwuenCrypto.importAesKey(finalKey);
   }
 
   async function ensureFolderKey(folder, isShared) {
@@ -400,8 +502,11 @@
       }
 
       if (!cryptoReady) {
-        setStatus(status, "Re-login to unlock encryption.", "error");
-        return;
+        const unlocked = await ensureCryptoUnlocked(status);
+        if (!unlocked) {
+          setStatus(status, "Unlock encryption to edit notes.", "error");
+          return;
+        }
       }
 
       const nextBody = textarea.value.trim();
@@ -548,6 +653,9 @@
 
       const notes = Array.isArray(data.postIts) ? data.postIts : [];
       const canEdit = Boolean(data.canEdit);
+      if (notes.some((note) => note.body_ciphertext) && !cryptoReady) {
+        await ensureCryptoUnlocked(composeStatus);
+      }
       for (const note of notes) {
         await appendPostIt(note, canEdit, folderId);
       }
@@ -745,10 +853,10 @@
       return;
     }
 
-    await initCrypto();
+    await ensureCryptoUnlocked(composeStatus);
     if (!cryptoReady) {
       setComposeEnabled(false);
-      setStatus(composeStatus, "Re-login to unlock encrypted notes.", "error");
+      setStatus(composeStatus, "Unlock encryption to manage notes.", "error");
     }
 
     try {
@@ -886,8 +994,11 @@
       }
 
       if (!cryptoReady) {
-        setStatus(composeStatus, "Re-login to unlock encryption.", "error");
-        return;
+        const unlocked = await ensureCryptoUnlocked(composeStatus);
+        if (!unlocked) {
+          setStatus(composeStatus, "Unlock encryption to save notes.", "error");
+          return;
+        }
       }
 
       setStatus(composeStatus, "Saving...");
@@ -935,5 +1046,13 @@
   }
 
   loadCurrentUser();
+  window.addEventListener("lezwuen-lock", () => {
+    cryptoReady = false;
+    privateKey = null;
+    publicKey = null;
+    if (composeStatus) {
+      setStatus(composeStatus, "Session locked. Unlock to continue.", "error");
+    }
+  });
   loadFolders();
 })();

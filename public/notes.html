@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+    />
+    <title>LeZwuen | Post-it Notes</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="app-body">
+    <header class="site-header">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-text">LeZwuen</span>
+      </div>
+      <nav class="site-nav">
+        <a class="nav-link" href="home.html">Home</a>
+        <a class="nav-link" href="messages.html">Messages</a>
+        <details class="nav-dropdown">
+          <summary class="nav-link active">Services</summary>
+          <div class="nav-dropdown-menu">
+            <a class="nav-dropdown-link" href="profit.html">Profit calculator</a>
+            <a class="nav-dropdown-link active" href="notes.html">Post-it notes</a>
+          </div>
+        </details>
+      </nav>
+      <div class="profile-slot">
+        <a class="avatar-link" href="profile.html" aria-label="Go to profile">
+          <img
+            class="avatar"
+            src="avatar-placeholder.svg"
+            alt="Profile avatar"
+            data-avatar-img
+          />
+        </a>
+        <label class="avatar-edit" aria-label="Upload profile photo">
+          <input class="avatar-input" type="file" accept="image/*" data-avatar-input />
+          <span aria-hidden="true">+</span>
+        </label>
+        <span class="upload-status" data-upload-status aria-live="polite"></span>
+      </div>
+    </header>
+    <main class="app-layout app-layout-home">
+      <div class="post-it-shell">
+        <aside class="folder-panel">
+          <div class="folder-panel-title">Folders</div>
+          <form class="folder-form" data-folder-form>
+            <input
+              class="folder-input"
+              type="text"
+              maxlength="32"
+              placeholder="New folder name"
+              data-folder-input
+            />
+            <button class="primary" type="submit">Add</button>
+          </form>
+          <div class="folder-status" data-folder-status aria-live="polite"></div>
+          <div class="folder-list" data-folder-list></div>
+          <div class="folder-panel-title folder-panel-title-divider">Shared with me</div>
+          <div class="folder-list" data-shared-folder-list></div>
+        </aside>
+        <section class="folder-content">
+          <div class="folder-view-header">
+            <div>
+              <div class="folder-view-title" data-folder-title>Notes</div>
+              <div class="folder-view-meta" data-folder-meta></div>
+            </div>
+          </div>
+          <div class="post-it-grid" data-post-it-grid>
+            <section class="post-it post-it-compose" aria-label="Create note" data-post-it-compose>
+              <form class="post-it-form" data-post-it-form>
+                <div class="post-it-form-title">New note</div>
+                <textarea
+                  class="post-it-input"
+                  rows="7"
+                  placeholder="Write a note..."
+                  data-post-it-input
+                ></textarea>
+                <div class="post-it-actions">
+                  <button class="ghost" type="button" data-post-it-clear>Clear</button>
+                  <button class="primary" type="submit">Save note</button>
+                </div>
+                <div class="post-it-status" data-post-it-status aria-live="polite"></div>
+              </form>
+            </section>
+            <section class="post-it post-it-empty" data-post-it-empty hidden aria-label="Empty notes">
+              <p class="post-it-text">No notes yet.</p>
+            </section>
+          </div>
+        </section>
+      </div>
+    </main>
+    <script src="config.js"></script>
+    <script src="crypto.js"></script>
+    <script src="home.js"></script>
+    <script src="user.js"></script>
+  </body>
+</html>

@@ -1,11 +1,18 @@
 (() => {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
-  const PRIVATE_KEY_STORAGE = "lezwuenPrivateKey";
-  const PUBLIC_KEY_STORAGE = "lezwuenPublicKey";
   const FOLDER_KEY_PREFIX = "lezwuenFolderKey:";
   const DEFAULT_ITERATIONS = 150000;
   const HKDF_SALT = encoder.encode("lezwuen-hkdf-v1");
+  const DEFAULT_IDLE_TIMEOUT = 10 * 60 * 1000;
+
+  let cachedPublicKey = null;
+  let cachedPrivateKey = null;
+  const folderKeys = new Map();
+  let lastActivity = Date.now();
+  let idleTimeoutMs = DEFAULT_IDLE_TIMEOUT;
+  let idleTimer = null;
+  let activityListenersAttached = false;
 
   function arrayBufferToBase64(buffer) {
     const bytes = new Uint8Array(buffer);
@@ -30,21 +37,53 @@
   }
 
   function storeSessionKeys(publicKey, privateKey) {
-    sessionStorage.setItem(PUBLIC_KEY_STORAGE, publicKey);
-    sessionStorage.setItem(PRIVATE_KEY_STORAGE, privateKey);
+    cachedPublicKey = publicKey;
+    cachedPrivateKey = privateKey;
+    noteActivity();
   }
 
   function clearSessionKeys() {
-    sessionStorage.removeItem(PUBLIC_KEY_STORAGE);
-    sessionStorage.removeItem(PRIVATE_KEY_STORAGE);
+    lockNow();
   }
 
   function getStoredPublicKey() {
-    return sessionStorage.getItem(PUBLIC_KEY_STORAGE);
+    return cachedPublicKey;
   }
 
   function getStoredPrivateKey() {
-    return sessionStorage.getItem(PRIVATE_KEY_STORAGE);
+    return cachedPrivateKey;
+  }
+
+  function noteActivity() {
+    lastActivity = Date.now();
+  }
+
+  function lockNow() {
+    cachedPublicKey = null;
+    cachedPrivateKey = null;
+    folderKeys.clear();
+    noteActivity();
+    window.dispatchEvent(new CustomEvent("lezwuen-lock"));
+  }
+
+  function startAutoLock(timeoutMs = DEFAULT_IDLE_TIMEOUT) {
+    idleTimeoutMs = timeoutMs;
+    if (!activityListenersAttached) {
+      const activityEvents = ["mousemove", "keydown", "mousedown", "touchstart", "scroll"];
+      activityEvents.forEach((event) => {
+        window.addEventListener(event, noteActivity, { passive: true });
+      });
+      window.addEventListener("pagehide", lockNow);
+      activityListenersAttached = true;
+    }
+
+    if (!idleTimer) {
+      idleTimer = window.setInterval(() => {
+        if (cachedPrivateKey && Date.now() - lastActivity > idleTimeoutMs) {
+          lockNow();
+        }
+      }, 30000);
+    }
   }
 
   async function importPublicKey(base64) {
@@ -228,15 +267,16 @@
   }
 
   function getFolderKey(folderId) {
-    return sessionStorage.getItem(getFolderStorageKey(folderId));
+    return folderKeys.get(getFolderStorageKey(folderId)) || null;
   }
 
   function storeFolderKey(folderId, base64Key) {
-    sessionStorage.setItem(getFolderStorageKey(folderId), base64Key);
+    folderKeys.set(getFolderStorageKey(folderId), base64Key);
+    noteActivity();
   }
 
   function clearFolderKey(folderId) {
-    sessionStorage.removeItem(getFolderStorageKey(folderId));
+    folderKeys.delete(getFolderStorageKey(folderId));
   }
 
   window.LeZwuenCrypto = {
@@ -248,6 +288,9 @@
     clearSessionKeys,
     getStoredPublicKey,
     getStoredPrivateKey,
+    noteActivity,
+    lockNow,
+    startAutoLock,
     getPrivateKey,
     getPublicKey,
     importPublicKey,
