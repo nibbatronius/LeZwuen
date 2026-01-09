@@ -1160,9 +1160,9 @@ app.get("/api/users/:id", async (req, res) => {
       return res.status(404).json({ error: "User not found." });
     }
 
-    const user = result.rows[0];
-    decryptRow(user, ["email", "display_name", "profile_image_url", "account_type"]);
-    return res.json({ ok: true, user });
+    const updatedUser = result.rows[0];
+    decryptRow(updatedUser, ["email", "display_name", "profile_image_url", "account_type"]);
+    return res.json({ ok: true, user: updatedUser });
   } catch (error) {
     console.error("User lookup failed:", error);
     return res.status(500).json({ error: "Unable to load profile." });
