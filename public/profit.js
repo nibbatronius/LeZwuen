@@ -19,6 +19,12 @@
   const setGoalButton = document.querySelector("[data-set-goal]");
   const goalMeterFill = document.querySelector("[data-goal-meter]");
   const marginBadge = document.querySelector("[data-margin-badge]");
+  const sensitivitySlider = document.querySelector("[data-sensitivity-slider]");
+  const sensitivityValue = document.querySelector("[data-sensitivity-value]");
+  const sensitivityReset = document.querySelector("[data-sensitivity-reset]");
+  const contributionBody = document.querySelector("[data-contribution-body]");
+  const breakevenUnitsInput = document.querySelector("[data-breakeven-units]");
+  const breakevenPaceInput = document.querySelector("[data-breakeven-pace]");
 
   const outputValues = {
     revenue: document.querySelector("[data-output='revenue']"),
@@ -27,6 +33,17 @@
     breakeven: document.querySelector("[data-output='breakeven']"),
     rev_unit: document.querySelector("[data-output='rev_unit']"),
     cost_ratio: document.querySelector("[data-output='cost_ratio']")
+  };
+
+  const sensitivityOutputs = {
+    revenue: document.querySelector("[data-sensitivity-output='revenue']"),
+    profit: document.querySelector("[data-sensitivity-output='profit']"),
+    breakeven: document.querySelector("[data-sensitivity-output='breakeven']")
+  };
+
+  const breakevenOutputs = {
+    price: document.querySelector("[data-breakeven-output='price']"),
+    time: document.querySelector("[data-breakeven-output='time']")
   };
 
   const outputTags = {
@@ -79,6 +96,7 @@
   let productRows = [];
   let activeDashboard = "summary";
   let profitSaveTimer = null;
+  let sharedSaveTimer = null;
   let goalData = {
     revenue: null,
     profit: null,
@@ -91,8 +109,10 @@
     margin: null,
     breakeven: null,
     unit_price: null,
-    cost_ratio: null
+    cost_ratio: null,
+    total_costs: null
   };
+  let currentProducts = [];
 
   function formatNumber(value, decimals) {
     return value.toLocaleString("en-US", {
@@ -107,6 +127,12 @@
 
   function formatPercent(value) {
     return `${value.toFixed(1)}%`;
+  }
+
+  function formatSignedPercent(value) {
+    const rounded = Math.round(value);
+    const sign = rounded > 0 ? "+" : "";
+    return `${sign}${rounded}%`;
   }
 
   function formatUnits(value) {
@@ -145,6 +171,42 @@
 
   function getAuthToken() {
     return localStorage.getItem("lezwuenAuthToken");
+  }
+
+  function scheduleSharedSave() {
+    if (!window.LeZwuenSharedData) {
+      return;
+    }
+    if (sharedSaveTimer) {
+      clearTimeout(sharedSaveTimer);
+    }
+    sharedSaveTimer = setTimeout(() => {
+      const payload = {
+        currency: currencySelect.value,
+        profit: {
+          inputs: {
+            cogs: cogsInput.value,
+            overhead: overheadInput.value
+          },
+          products: productRows.map((row) => ({
+            units: row.unitsInput.value,
+            price: row.priceInput.value
+          })),
+          sales: productRows.map((row) => ({
+            sold: row.soldUnitsInput.value,
+            sold_price: row.soldTotalInput.value
+          })),
+          tools: {
+            sensitivity: sensitivitySlider ? sensitivitySlider.value : "0",
+            breakeven: {
+              planned_units: breakevenUnitsInput ? breakevenUnitsInput.value : "",
+              pace: breakevenPaceInput ? breakevenPaceInput.value : ""
+            }
+          }
+        }
+      };
+      window.LeZwuenSharedData.merge(payload);
+    }, 200);
   }
 
   function scheduleProfitSnapshot(cogs, overhead) {
@@ -198,6 +260,97 @@
     return String(value);
   }
 
+  function applySharedAutofill() {
+    if (!window.LeZwuenSharedData) {
+      return;
+    }
+    const shared = window.LeZwuenSharedData.read();
+    if (shared.currency && currencyOptions.includes(shared.currency)) {
+      currencySelect.value = shared.currency;
+    }
+
+    const sharedProfit = shared.profit && typeof shared.profit === "object" ? shared.profit : {};
+    const sharedInputs = sharedProfit.inputs && typeof sharedProfit.inputs === "object"
+      ? sharedProfit.inputs
+      : {};
+
+    if (!cogsInput.value && sharedInputs.cogs) {
+      cogsInput.value = safeString(sharedInputs.cogs);
+    }
+    if (!overheadInput.value && sharedInputs.overhead) {
+      overheadInput.value = safeString(sharedInputs.overhead);
+    }
+
+    const sharedProducts = Array.isArray(sharedProfit.products) ? sharedProfit.products : [];
+    if (sharedProducts.length) {
+      setProductRows(sharedProducts);
+      productRows.forEach((row, index) => {
+        const product = sharedProducts[index] || {};
+        if (!row.unitsInput.value && product.units) {
+          row.unitsInput.value = safeString(product.units);
+        }
+        if (!row.priceInput.value && product.price) {
+          row.priceInput.value = safeString(product.price);
+        }
+      });
+    }
+
+    const sharedSales = Array.isArray(sharedProfit.sales) ? sharedProfit.sales : [];
+    if (sharedSales.length) {
+      productRows.forEach((row, index) => {
+        const sale = sharedSales[index] || {};
+        if (!row.soldUnitsInput.value && sale.sold) {
+          row.soldUnitsInput.value = safeString(sale.sold);
+        }
+        if (!row.soldTotalInput.value && sale.sold_price) {
+          row.soldTotalInput.value = safeString(sale.sold_price);
+        }
+      });
+    }
+
+    const sharedTools = sharedProfit.tools && typeof sharedProfit.tools === "object"
+      ? sharedProfit.tools
+      : {};
+    if (sensitivitySlider && sharedTools.sensitivity !== undefined) {
+      sensitivitySlider.value = safeString(sharedTools.sensitivity) || "0";
+    }
+    if (breakevenUnitsInput && sharedTools.breakeven && !breakevenUnitsInput.value) {
+      breakevenUnitsInput.value = safeString(sharedTools.breakeven.planned_units);
+    }
+    if (breakevenPaceInput && sharedTools.breakeven && !breakevenPaceInput.value) {
+      breakevenPaceInput.value = safeString(sharedTools.breakeven.pace);
+    }
+
+    const sharedExpenseSummary =
+      shared.expenses && shared.expenses.summary ? shared.expenses.summary : null;
+    if (sharedExpenseSummary && sharedExpenseSummary.by_category) {
+      const byCategory = sharedExpenseSummary.by_category;
+      const cogsTotal = (byCategory.Inventory || 0) + (byCategory.Shipping || 0);
+      const overheadTotal =
+        (byCategory.Marketing || 0) + (byCategory.Operations || 0) + (byCategory.Other || 0);
+      if (!cogsInput.value && cogsTotal > 0) {
+        cogsInput.value = formatNumber(cogsTotal, 2);
+      }
+      if (!overheadInput.value && overheadTotal > 0) {
+        overheadInput.value = formatNumber(overheadTotal, 2);
+      }
+    }
+
+    const sharedSalesSummary = shared.sales && shared.sales.summary ? shared.sales.summary : null;
+    if (sharedSalesSummary && productRows.length) {
+      const firstRow = productRows[0];
+      if (firstRow && !firstRow.unitsInput.value && sharedSalesSummary.total_units) {
+        firstRow.unitsInput.value = formatNumber(sharedSalesSummary.total_units, 0);
+      }
+      if (firstRow && !firstRow.priceInput.value && sharedSalesSummary.avg_unit_price) {
+        firstRow.priceInput.value = formatNumber(sharedSalesSummary.avg_unit_price, 2);
+      }
+      if (breakevenUnitsInput && !breakevenUnitsInput.value && sharedSalesSummary.total_units) {
+        breakevenUnitsInput.value = formatNumber(sharedSalesSummary.total_units, 0);
+      }
+    }
+  }
+
   function setOutputValue(key, value) {
     const element = outputValues[key];
     if (element) {
@@ -215,6 +368,20 @@
       element.setAttribute("data-type", status);
     } else {
       element.removeAttribute("data-type");
+    }
+  }
+
+  function setSensitivityOutput(key, value) {
+    const element = sensitivityOutputs[key];
+    if (element) {
+      element.textContent = value;
+    }
+  }
+
+  function setBreakevenOutput(key, value) {
+    const element = breakevenOutputs[key];
+    if (element) {
+      element.textContent = value;
     }
   }
 
@@ -371,6 +538,147 @@
     }
   }
 
+  function formatBreakevenTime(weeks) {
+    if (!Number.isFinite(weeks) || weeks < 0) {
+      return "--";
+    }
+    if (weeks < 1) {
+      const days = weeks * 7;
+      if (days < 1) {
+        return `${days.toFixed(1)} days`;
+      }
+      return `${days.toFixed(0)} days`;
+    }
+    if (weeks < 8) {
+      return `${weeks.toFixed(1)} weeks`;
+    }
+    const months = weeks / 4.345;
+    if (months < 12) {
+      return `${months.toFixed(1)} months`;
+    }
+    const years = months / 12;
+    return `${years.toFixed(1)} years`;
+  }
+
+  function updateContributionView(products, totalRevenue, totalCosts) {
+    if (!contributionBody) {
+      return;
+    }
+    contributionBody.textContent = "";
+
+    if (!products.length) {
+      return;
+    }
+
+    const hasRevenue = totalRevenue !== null && totalRevenue > 0;
+    const hasCosts = totalCosts !== null;
+
+    products.forEach((product) => {
+      const row = document.createElement("div");
+      row.className = "profit-table-row";
+
+      const label = document.createElement("span");
+      label.className = "profit-row-label";
+      label.textContent = product.label;
+
+      const revenueValue = document.createElement("span");
+      revenueValue.className = "profit-row-value";
+      revenueValue.textContent =
+        product.revenue !== null ? formatCurrency(product.revenue) : "--";
+
+      const shareValue = document.createElement("span");
+      shareValue.className = "profit-row-value";
+      if (hasRevenue && product.revenue !== null) {
+        shareValue.textContent = formatPercent((product.revenue / totalRevenue) * 100);
+      } else {
+        shareValue.textContent = "--";
+      }
+
+      const contributionValue = document.createElement("span");
+      contributionValue.className = "profit-row-value";
+      if (hasRevenue && hasCosts && product.revenue !== null) {
+        const allocatedCost = (product.revenue / totalRevenue) * totalCosts;
+        contributionValue.textContent = formatCurrency(product.revenue - allocatedCost);
+      } else {
+        contributionValue.textContent = "--";
+      }
+
+      row.append(label, revenueValue, shareValue, contributionValue);
+      contributionBody.appendChild(row);
+    });
+  }
+
+  function updateSensitivityView(products, totalCosts) {
+    if (!sensitivitySlider) {
+      return;
+    }
+    const rawDelta = Number.parseFloat(sensitivitySlider.value);
+    const delta = Number.isFinite(rawDelta) ? rawDelta : 0;
+    const multiplier = 1 + delta / 100;
+    if (sensitivityValue) {
+      sensitivityValue.textContent = formatSignedPercent(delta);
+    }
+
+    let adjustedRevenue = 0;
+    let pricedUnits = 0;
+    let hasRevenue = false;
+
+    products.forEach((product) => {
+      if (product.units !== null && product.price !== null) {
+        adjustedRevenue += product.units * product.price * multiplier;
+        pricedUnits += product.units;
+        hasRevenue = true;
+      }
+    });
+
+    if (!hasRevenue) {
+      setSensitivityOutput("revenue", "--");
+      setSensitivityOutput("profit", "--");
+      setSensitivityOutput("breakeven", "--");
+      return;
+    }
+
+    setSensitivityOutput("revenue", formatCurrency(adjustedRevenue));
+
+    if (totalCosts !== null) {
+      const adjustedProfit = adjustedRevenue - totalCosts;
+      setSensitivityOutput("profit", formatCurrency(adjustedProfit));
+    } else {
+      setSensitivityOutput("profit", "--");
+    }
+
+    const adjustedUnitPrice = pricedUnits > 0 ? adjustedRevenue / pricedUnits : null;
+    if (totalCosts !== null && adjustedUnitPrice !== null && adjustedUnitPrice > 0) {
+      const breakevenUnits = totalCosts / adjustedUnitPrice;
+      setSensitivityOutput("breakeven", `${Math.ceil(breakevenUnits)}`);
+    } else {
+      setSensitivityOutput("breakeven", "--");
+    }
+  }
+
+  function updateBreakevenCalculator(totalCosts, breakevenUnits) {
+    if (!breakevenUnitsInput && !breakevenPaceInput) {
+      return;
+    }
+
+    const plannedUnits = breakevenUnitsInput ? parseValue(breakevenUnitsInput.value) : null;
+    const pace = breakevenPaceInput ? parseValue(breakevenPaceInput.value) : null;
+
+    if (totalCosts !== null && plannedUnits !== null && plannedUnits > 0) {
+      const priceNeeded = totalCosts / plannedUnits;
+      setBreakevenOutput("price", formatCurrency(priceNeeded));
+    } else {
+      setBreakevenOutput("price", "--");
+    }
+
+    if (breakevenUnits !== null && pace !== null && pace > 0) {
+      const weeks = breakevenUnits / pace;
+      setBreakevenOutput("time", formatBreakevenTime(weeks));
+    } else {
+      setBreakevenOutput("time", "--");
+    }
+  }
+
   function applyGoalData() {
     if (goalValues.goal_revenue) {
       goalValues.goal_revenue.textContent =
@@ -405,21 +713,24 @@
     const cogs = parseValue(cogsInput.value);
     const overhead = parseValue(overheadInput.value);
     let totalRevenue = 0;
-    let totalUnits = 0;
     let pricedUnits = 0;
     let hasRevenue = false;
-    let hasUnits = false;
-
-    productRows.forEach((row) => {
+    const productStats = productRows.map((row) => {
       const units = parseValue(row.unitsInput.value);
       const price = parseValue(row.priceInput.value);
-      if (units !== null) {
-        totalUnits += units;
-        hasUnits = true;
-      }
-      if (units !== null && price !== null) {
-        totalRevenue += units * price;
-        pricedUnits += units;
+      const revenue = units !== null && price !== null ? units * price : null;
+      return {
+        label: row.label.textContent,
+        units,
+        price,
+        revenue
+      };
+    });
+
+    productStats.forEach((product) => {
+      if (product.units !== null && product.price !== null) {
+        totalRevenue += product.units * product.price;
+        pricedUnits += product.units;
         hasRevenue = true;
       }
     });
@@ -436,6 +747,7 @@
     let marginValue = null;
     let breakevenValue = null;
     let ratioValue = null;
+    let totalCosts = null;
 
     if (revenue !== null) {
       setOutputValue("revenue", formatCurrency(revenue));
@@ -509,9 +821,12 @@
       setOutputValue("rev_unit", "--");
     }
 
-    if (overhead !== null && cogs !== null && unitPrice !== null) {
+    if (overhead !== null && cogs !== null) {
+      totalCosts = overhead + cogs;
+    }
+
+    if (totalCosts !== null && unitPrice !== null) {
       if (unitPrice > 0) {
-        const totalCosts = overhead + cogs;
         const breakeven = totalCosts / unitPrice;
         breakevenValue = breakeven;
         if (breakeven <= 0) {
@@ -538,8 +853,8 @@
       }
     }
 
-    if (revenue !== null && revenue !== 0 && cogs !== null && overhead !== null) {
-      ratioValue = ((cogs + overhead) / revenue) * 100;
+    if (revenue !== null && revenue !== 0 && totalCosts !== null) {
+      ratioValue = (totalCosts / revenue) * 100;
       setOutputValue("cost_ratio", formatPercent(ratioValue));
     } else {
       setOutputValue("cost_ratio", "--");
@@ -551,9 +866,16 @@
       margin: marginValue,
       breakeven: breakevenValue,
       unit_price: unitPrice,
-      cost_ratio: ratioValue
+      cost_ratio: ratioValue,
+      total_costs: totalCosts
     };
 
+    currentProducts = productStats;
+    updateContributionView(productStats, revenue, totalCosts);
+    updateSensitivityView(productStats, totalCosts);
+    updateBreakevenCalculator(totalCosts, breakevenValue);
+
+    scheduleSharedSave();
     scheduleProfitSnapshot(cogs, overhead);
     updateGoalProgress();
   }
@@ -649,6 +971,8 @@
         goalMeterFill.style.width = "0%";
       }
     }
+
+    scheduleSharedSave();
   }
 
   function collectSnapshot() {
@@ -667,6 +991,13 @@
         sold_price: row.soldTotalInput.value
       })),
       goals: { ...goalData },
+      tools: {
+        sensitivity: sensitivitySlider ? sensitivitySlider.value : "0",
+        breakeven: {
+          planned_units: breakevenUnitsInput ? breakevenUnitsInput.value : "",
+          pace: breakevenPaceInput ? breakevenPaceInput.value : ""
+        }
+      },
       outputs: {
         revenue: outputValues.revenue ? outputValues.revenue.textContent : "",
         profit: outputValues.profit ? outputValues.profit.textContent : "",
@@ -750,6 +1081,17 @@
       breakeven: coerceGoalValue(goals.breakeven)
     };
 
+    const tools = data.tools && typeof data.tools === "object" ? data.tools : {};
+    if (sensitivitySlider && tools.sensitivity !== undefined) {
+      sensitivitySlider.value = safeString(tools.sensitivity) || "0";
+    }
+    if (breakevenUnitsInput && tools.breakeven) {
+      breakevenUnitsInput.value = safeString(tools.breakeven.planned_units);
+    }
+    if (breakevenPaceInput && tools.breakeven) {
+      breakevenPaceInput.value = safeString(tools.breakeven.pace);
+    }
+
     applyGoalData();
     updateCurrencyPrefixes();
     updateMetrics();
@@ -764,6 +1106,15 @@
       row.soldUnitsInput.value = "";
       row.soldTotalInput.value = "";
     });
+    if (breakevenUnitsInput) {
+      breakevenUnitsInput.value = "";
+    }
+    if (breakevenPaceInput) {
+      breakevenPaceInput.value = "";
+    }
+    if (sensitivitySlider) {
+      sensitivitySlider.value = "0";
+    }
     updateMetrics();
     clearProfitSnapshot();
   }
@@ -786,6 +1137,8 @@
   addProductRow({ silent: true });
   refreshProductLabels();
   updateCurrencyPrefixes();
+  applySharedAutofill();
+  updateCurrencyPrefixes();
   applyGoalData();
   updateMetrics();
   setDashboard(activeDashboard);
@@ -795,6 +1148,9 @@
       updateCurrencyPrefixes();
       applyGoalData();
       updateMetrics();
+      if (window.LeZwuenSharedData) {
+        window.LeZwuenSharedData.setCurrency(currencySelect.value);
+      }
     });
   }
 
@@ -803,6 +1159,31 @@
   }
   if (overheadInput) {
     overheadInput.addEventListener("input", updateMetrics);
+  }
+  if (breakevenUnitsInput) {
+    breakevenUnitsInput.addEventListener("input", () => {
+      updateBreakevenCalculator(currentMetrics.total_costs, currentMetrics.breakeven);
+      scheduleSharedSave();
+    });
+  }
+  if (breakevenPaceInput) {
+    breakevenPaceInput.addEventListener("input", () => {
+      updateBreakevenCalculator(currentMetrics.total_costs, currentMetrics.breakeven);
+      scheduleSharedSave();
+    });
+  }
+  if (sensitivitySlider) {
+    sensitivitySlider.addEventListener("input", () => {
+      updateSensitivityView(currentProducts, currentMetrics.total_costs);
+      scheduleSharedSave();
+    });
+  }
+  if (sensitivityReset && sensitivitySlider) {
+    sensitivityReset.addEventListener("click", () => {
+      sensitivitySlider.value = "0";
+      updateSensitivityView(currentProducts, currentMetrics.total_costs);
+      scheduleSharedSave();
+    });
   }
   if (addProductButton) {
     addProductButton.addEventListener("click", () => addProductRow());

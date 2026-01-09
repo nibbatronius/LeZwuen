@@ -154,6 +154,100 @@
                 <div class="profit-highlight-value" data-output="cost_ratio">--</div>
               </div>
             </div>
+            <div class="profit-section">
+              <div class="profit-section-header">
+                <div class="panel-title">Price sensitivity</div>
+                <button class="ghost" type="button" data-sensitivity-reset>Reset</button>
+              </div>
+              <div class="profit-sensitivity">
+                <div class="profit-sensitivity-row">
+                  <span class="profit-sensitivity-label">Price change</span>
+                  <span class="profit-sensitivity-value" data-sensitivity-value>0%</span>
+                </div>
+                <input
+                  class="profit-slider"
+                  type="range"
+                  min="-30"
+                  max="30"
+                  step="1"
+                  value="0"
+                  data-sensitivity-slider
+                />
+                <div class="profit-highlight-grid profit-sensitivity-grid">
+                  <div class="profit-highlight-card">
+                    <div class="profit-highlight-label">Adj revenue</div>
+                    <div class="profit-highlight-value" data-sensitivity-output="revenue">--</div>
+                  </div>
+                  <div class="profit-highlight-card">
+                    <div class="profit-highlight-label">Adj profit</div>
+                    <div class="profit-highlight-value" data-sensitivity-output="profit">--</div>
+                  </div>
+                  <div class="profit-highlight-card">
+                    <div class="profit-highlight-label">Adj breakeven</div>
+                    <div class="profit-highlight-value" data-sensitivity-output="breakeven">--</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="profit-section">
+              <div class="profit-section-header">
+                <div class="panel-title">Break-even calculator</div>
+              </div>
+              <div class="profit-break">
+                <div class="profit-break-fields">
+                  <div class="profit-field">
+                    <label class="profit-field-label" for="profit-break-units">Planned units</label>
+                    <input
+                      id="profit-break-units"
+                      class="profit-compact-input"
+                      type="text"
+                      inputmode="decimal"
+                      placeholder="0"
+                      data-breakeven-units
+                    />
+                  </div>
+                  <div class="profit-field">
+                    <label class="profit-field-label" for="profit-break-pace">Units per week</label>
+                    <input
+                      id="profit-break-pace"
+                      class="profit-compact-input"
+                      type="text"
+                      inputmode="decimal"
+                      placeholder="0"
+                      data-breakeven-pace
+                    />
+                  </div>
+                </div>
+                <div class="profit-highlight-grid profit-break-grid">
+                  <div class="profit-highlight-card">
+                    <div class="profit-highlight-label">Req avg price</div>
+                    <div class="profit-highlight-value" data-breakeven-output="price">--</div>
+                  </div>
+                  <div class="profit-highlight-card">
+                    <div class="profit-highlight-label">Time to breakeven</div>
+                    <div class="profit-highlight-value" data-breakeven-output="time">--</div>
+                  </div>
+                </div>
+                <div class="profit-tip">
+                  Use planned units or pace to estimate required price and timeline.
+                </div>
+              </div>
+            </div>
+            <div class="profit-section">
+              <div class="profit-section-header">
+                <div class="panel-title">Product contribution</div>
+              </div>
+              <div class="profit-table profit-table-contribution">
+                <div class="profit-table-head">
+                  <span>Product</span>
+                  <span>Revenue</span>
+                  <span>Share</span>
+                  <span>Contribution</span>
+                </div>
+                <div class="profit-table-body" data-contribution-body></div>
+              </div>
+              <div class="profit-tip">Revenue share and estimated profit contribution.</div>
+            </div>
           </div>
           <div class="profit-dashboard" data-dashboard="goal" hidden>
             <div class="profit-goal-header">
@@ -226,6 +320,7 @@
       </section>
     </main>
     <script src="config.js"></script>
+    <script src="shared-data.js"></script>
     <script src="owner-tools.js"></script>
     <script src="profit.js"></script>
     <script src="user.js"></script>

@@ -50,6 +50,7 @@
 
   const apiBaseUrl =
     window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL ? window.APP_CONFIG.API_BASE_URL : "";
+  const sharedData = window.LeZwuenSharedData;
 
   let expenses = [];
 
@@ -129,6 +130,30 @@
     });
   }
 
+  function applySharedAutofill() {
+    if (!sharedData) {
+      return;
+    }
+    const shared = sharedData.read();
+    if (currencySelect && shared.currency && currencyOptions.includes(shared.currency)) {
+      currencySelect.value = shared.currency;
+      localStorage.setItem(CURRENCY_KEY, shared.currency);
+    }
+
+    const lastExpense = shared.expenses && shared.expenses.last_expense
+      ? shared.expenses.last_expense
+      : null;
+    if (nameInput && !nameInput.value && lastExpense && lastExpense.name) {
+      nameInput.value = lastExpense.name;
+    }
+    if (amountInput && !amountInput.value && lastExpense && lastExpense.amount) {
+      amountInput.value = String(lastExpense.amount);
+    }
+    if (categorySelect && lastExpense && lastExpense.category) {
+      categorySelect.value = lastExpense.category;
+    }
+  }
+
   function renderExpenses() {
     if (!list) {
       return;
@@ -185,12 +210,34 @@
         });
     }
 
-    const total = expenses.reduce((sum, expense) => sum + (expense.amount || 0), 0);
+    const summary = expenses.reduce(
+      (acc, expense) => {
+        const amount = expense.amount || 0;
+        const category = expense.category || "Other";
+        acc.total += amount;
+        acc.by_category[category] = (acc.by_category[category] || 0) + amount;
+        return acc;
+      },
+      { total: 0, by_category: {} }
+    );
     if (totalValue) {
-      totalValue.textContent = formatCurrency(total);
+      totalValue.textContent = formatCurrency(summary.total);
     }
     if (countValue) {
       countValue.textContent = `${expenses.length}`;
+    }
+
+    if (sharedData) {
+      sharedData.merge({
+        currency: currencySelect ? currencySelect.value : "USD",
+        expenses: {
+          summary: {
+            total: summary.total,
+            count: expenses.length,
+            by_category: summary.by_category
+          }
+        }
+      });
     }
   }
 
@@ -334,13 +381,16 @@
         currencySelect.appendChild(option);
       });
     }
+    const sharedCurrency = sharedData ? sharedData.read().currency : null;
     const storedCurrency = localStorage.getItem(CURRENCY_KEY);
-    const initialCurrency = storedCurrency || currencySelect.value || "USD";
+    const initialCurrency = sharedCurrency || storedCurrency || currencySelect.value || "USD";
     currencySelect.value = currencyOptions.includes(initialCurrency) ? initialCurrency : "USD";
     updateCurrencyPrefixes();
   }
 
   setupCurrency();
+  applySharedAutofill();
+  updateCurrencyPrefixes();
   renderExpenses();
   updateProfitDisplay();
   fetchExpenses();
@@ -394,6 +444,19 @@
           expenses.unshift(data.expense);
           renderExpenses();
           updateProfitDisplay();
+        }
+        if (sharedData) {
+          sharedData.merge({
+            currency: currencySelect ? currencySelect.value : "USD",
+            expenses: {
+              last_expense: {
+                name: name || "Untitled",
+                amount,
+                category,
+                date: dateValue || new Date().toISOString().slice(0, 10)
+              }
+            }
+          });
         }
         if (nameInput) {
           nameInput.value = "";
@@ -479,6 +542,9 @@
       updateCurrencyPrefixes();
       renderExpenses();
       updateProfitDisplay();
+      if (sharedData) {
+        sharedData.setCurrency(currencySelect.value);
+      }
     });
   }
 

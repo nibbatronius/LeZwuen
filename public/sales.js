@@ -47,6 +47,7 @@
 
   const apiBaseUrl =
     window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL ? window.APP_CONFIG.API_BASE_URL : "";
+  const sharedData = window.LeZwuenSharedData;
 
   let sales = [];
 
@@ -134,6 +135,53 @@
     currencyPrefixes.forEach((prefix) => {
       prefix.textContent = currencySelect.value || "USD";
     });
+  }
+
+  function applySharedAutofill() {
+    if (!sharedData) {
+      return;
+    }
+    const shared = sharedData.read();
+    if (currencySelect && shared.currency && currencyOptions.includes(shared.currency)) {
+      currencySelect.value = shared.currency;
+      localStorage.setItem(CURRENCY_KEY, shared.currency);
+    }
+
+    const lastSale = shared.sales && shared.sales.last_sale ? shared.sales.last_sale : null;
+    if (nameInput && !nameInput.value && lastSale && lastSale.name) {
+      nameInput.value = lastSale.name;
+    }
+    if (unitsInput && !unitsInput.value && lastSale && lastSale.units) {
+      unitsInput.value = String(lastSale.units);
+    }
+    if (unitPriceInput && !unitPriceInput.value && lastSale && lastSale.unit_price) {
+      unitPriceInput.value = String(lastSale.unit_price);
+    }
+
+    const summary = shared.sales && shared.sales.summary ? shared.sales.summary : null;
+    if (unitPriceInput && !unitPriceInput.value && summary && summary.avg_unit_price) {
+      unitPriceInput.value = formatNumber(summary.avg_unit_price, 2);
+    }
+
+    if (unitPriceInput && !unitPriceInput.value) {
+      const sharedProfit = shared.profit && Array.isArray(shared.profit.products)
+        ? shared.profit.products
+        : [];
+      if (sharedProfit.length) {
+        let priceTotal = 0;
+        let priceCount = 0;
+        sharedProfit.forEach((product) => {
+          const price = parseValue(product.price);
+          if (price !== null) {
+            priceTotal += price;
+            priceCount += 1;
+          }
+        });
+        if (priceCount > 0) {
+          unitPriceInput.value = formatNumber(priceTotal / priceCount, 2);
+        }
+      }
+    }
   }
 
   function updateTotalPreview() {
@@ -226,6 +274,20 @@
     if (avgPriceValue) {
       avgPriceValue.textContent = avgUnitPrice !== null ? formatCurrency(avgUnitPrice) : "--";
     }
+
+    if (sharedData) {
+      const currency = currencySelect ? currencySelect.value : "USD";
+      sharedData.merge({
+        currency,
+        sales: {
+          summary: {
+            total_revenue: totalRevenue,
+            total_units: totalUnits,
+            avg_unit_price: avgUnitPrice
+          }
+        }
+      });
+    }
   }
 
   async function fetchSales() {
@@ -265,13 +327,16 @@
         currencySelect.appendChild(option);
       });
     }
+    const sharedCurrency = sharedData ? sharedData.read().currency : null;
     const storedCurrency = localStorage.getItem(CURRENCY_KEY);
-    const initialCurrency = storedCurrency || currencySelect.value || "USD";
+    const initialCurrency = sharedCurrency || storedCurrency || currencySelect.value || "USD";
     currencySelect.value = currencyOptions.includes(initialCurrency) ? initialCurrency : "USD";
     updateCurrencyPrefixes();
   }
 
   setupCurrency();
+  applySharedAutofill();
+  updateCurrencyPrefixes();
   renderSales();
   fetchSales();
   updateTotalPreview();
@@ -336,6 +401,19 @@
         if (data && data.sale) {
           sales.unshift(data.sale);
           renderSales();
+        }
+        if (sharedData) {
+          sharedData.merge({
+            currency: currencySelect ? currencySelect.value : "USD",
+            sales: {
+              last_sale: {
+                name: name || "Untitled",
+                units,
+                unit_price: unitPrice,
+                date: dateValue || new Date().toISOString().slice(0, 10)
+              }
+            }
+          });
         }
         if (nameInput) {
           nameInput.value = "";
@@ -423,6 +501,9 @@
       updateCurrencyPrefixes();
       renderSales();
       updateTotalPreview();
+      if (sharedData) {
+        sharedData.setCurrency(currencySelect.value);
+      }
     });
   }
 })();

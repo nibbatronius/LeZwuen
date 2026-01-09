@@ -884,6 +884,15 @@ body::after {
     minmax(90px, 1fr);
 }
 
+.profit-table-contribution .profit-table-head,
+.profit-table-contribution .profit-table-row {
+  grid-template-columns:
+    minmax(120px, 1.2fr)
+    minmax(120px, 1fr)
+    minmax(90px, 1fr)
+    minmax(120px, 1fr);
+}
+
 .profit-table-head {
   font-size: 0.7rem;
   text-transform: uppercase;
@@ -996,6 +1005,51 @@ body::after {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+}
+
+.profit-sensitivity {
+  display: grid;
+  gap: 12px;
+}
+
+.profit-sensitivity-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.profit-sensitivity-value {
+  color: var(--ink);
+  letter-spacing: 0.08em;
+  font-weight: 600;
+}
+
+.profit-slider {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.profit-sensitivity-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.profit-break {
+  display: grid;
+  gap: 12px;
+}
+
+.profit-break-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.profit-break-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .profit-highlight-card {
@@ -2198,6 +2252,8 @@ input:focus {
 
   .profit-goal-grid,
   .profit-highlight-grid,
+  .profit-sensitivity-grid,
+  .profit-break-grid,
   .expense-summary,
   .sales-summary,
   .dashboard-metrics {
@@ -2247,6 +2303,10 @@ input:focus {
   }
 
   .profit-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .profit-break-fields {
     grid-template-columns: 1fr;
   }
 
